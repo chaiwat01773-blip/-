@@ -1,0 +1,6 @@
+{
+  "name": "BlookLobby 3D",
+  "description": "Real-time 3D multiplayer quiz arena and party game lobby with QR code joining, composite 3D Blook avatars, and Socket.io synchronization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
