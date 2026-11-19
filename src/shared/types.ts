@@ -57,7 +57,96 @@ export interface PlayerPublicState {
   vy: number;
 }
 
-export type GamePhase = 'lobby' | 'question' | 'reveal' | 'podium';
+export type GameMode = 'quiz' | 'zombie';
+
+export type GamePhase = 'lobby' | 'question' | 'reveal' | 'podium' | 'zombie';
+
+export type ZombieTier = 'easy' | 'medium' | 'hard';
+
+export interface LogicPuzzle {
+  id: string;
+  tier: ZombieTier;
+  prompt: string;
+  displayAnswer: string;
+  acceptedAnswers: string[];
+  quickChoices: string[];
+}
+
+export interface ZombieEntityPublic {
+  id: string;
+  puzzle: LogicPuzzle;
+  x: number;
+  z: number;
+  speed: number;
+  phaseOffset: number;
+  enraged?: boolean;
+  isBoss?: boolean;
+  bossStep?: number;
+  bossTotalSteps?: number;
+  bossPuzzles?: LogicPuzzle[];
+}
+
+export interface ZombieDefenderPublic {
+  id: string;
+  name: string;
+  avatar: BlookAvatarId;
+  isHost: boolean;
+  score: number;
+  kills: number;
+  streak: number;
+  bestStreak: number;
+  explosiveAmmo: number;
+  zPos: number;
+}
+
+export interface ZombieShotEvent {
+  shooterId: string;
+  shooterName: string;
+  shooterZ: number;
+  targetZombieId: string;
+  targetX: number;
+  targetZ: number;
+  explosive: boolean;
+  killedIds: string[];
+  pointsEarned: number;
+  streakBonusAmmo: boolean;
+  answerPrompt: string;
+  bossHitOnly?: boolean;
+  bossDefeated?: boolean;
+  newBossStep?: number;
+}
+
+export interface ZombieWrongEvent {
+  shooterId: string;
+  shooterName: string;
+  zombieId: string;
+  newSpeed: number;
+  newPrompt: string;
+}
+
+export interface ZombieBreachEvent {
+  zombieId: string;
+  x: number;
+  z: number;
+  damage: number;
+  hpRemaining: number;
+  isBoss?: boolean;
+  stampedeTriggered?: boolean;
+}
+
+export interface ZombieGameSnapshot {
+  hp: number;
+  maxHp: number;
+  teamScore: number;
+  wave: number;
+  kills: number;
+  paused: boolean;
+  gameOver: boolean;
+  bossRushActive?: boolean;
+  zombies: ZombieEntityPublic[];
+  defenders: ZombieDefenderPublic[];
+  serverTime: number;
+}
 
 export interface PublicQuestionPayload {
   index: number;
@@ -77,6 +166,7 @@ export interface RevealPayload {
 
 export interface GameStateSnapshot {
   pin: string;
+  mode: GameMode;
   phase: GamePhase;
   packTitle: string;
   questionCount: number;
@@ -85,6 +175,11 @@ export interface GameStateSnapshot {
   correctIndex: number | null;
   optionCounts: [number, number, number, number];
   players: PlayerPublicState[];
+  zombiePackTitle: string;
+  zombiePuzzleCount: number;
+  zombiePuzzles: LogicPuzzle[];
+  zombieAutoFill: boolean;
+  zombieState: ZombieGameSnapshot | null;
 }
 
 export const ANSWER_PADS: Array<{

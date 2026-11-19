@@ -65,8 +65,12 @@ export class ArenaScene {
   private isSoftwareGl: boolean;
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
+  private fog!: THREE.FogExp2;
   private camera: THREE.PerspectiveCamera;
   private controls: OrbitControls;
+
+  private portraitScale = 1;
+  private portraitT = 0;
 
   private frameId = 0;
   private disposed = false;
@@ -141,11 +145,12 @@ export class ArenaScene {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0b1628);
-    this.scene.fog = new THREE.FogExp2(0x0b1628, 0.0135);
+    this.fog = new THREE.FogExp2(0x0b1628, 0.0135);
+    this.scene.fog = this.fog;
 
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
-    this.camera = new THREE.PerspectiveCamera(48, width / height, 0.1, 180);
+    this.camera = new THREE.PerspectiveCamera(48, width / Math.max(1, height), 0.1, 220);
     this.camera.position.set(0, 14, 21);
 
     // Mandatory studio environment map via PMREMGenerator
@@ -170,6 +175,7 @@ export class ArenaScene {
     this.controls.addEventListener('end', () => {
       this.userInteractingCamera = false;
     });
+    this.updateCameraForViewport(width, height);
 
     this.setupLighting();
     this.buildEnvironment();
@@ -708,20 +714,37 @@ export class ArenaScene {
     ent.targetVy = payload.vy;
   }
 
+  private updateCameraForViewport(w: number, h: number) {
+    const aspect = Math.max(1, w) / Math.max(1, h);
+    this.portraitT = THREE.MathUtils.clamp((1.1 - aspect) / (1.1 - 0.45), 0, 1);
+    this.camera.aspect = aspect;
+    this.camera.fov = THREE.MathUtils.lerp(48, 58, this.portraitT);
+    this.camera.updateProjectionMatrix();
+
+    this.portraitScale = THREE.MathUtils.lerp(1, 1.75, this.portraitT);
+    if (this.controls) {
+      this.controls.maxDistance = Math.round(42 * this.portraitScale);
+    }
+    if (this.fog) {
+      this.fog.density = 0.0135 / Math.sqrt(this.portraitScale);
+    }
+  }
+
   public setCameraPreset(preset: CameraPreset) {
     this.cameraPreset = preset;
     this.userInteractingCamera = false;
     this.transitionActive = true;
+    const s = this.portraitScale;
 
     if (preset === 'arena') {
-      this.transitionGoalPos.set(0, 14.5, 20.5);
-      this.transitionGoalTarget.set(0, 0.8, 0);
+      this.transitionGoalPos.set(0, 14.5 * s, 20.5 * s);
+      this.transitionGoalTarget.set(0, THREE.MathUtils.lerp(0.8, -1.4, this.portraitT), 0);
     } else if (preset === 'stage') {
-      this.transitionGoalPos.set(11, 7.5, 13.5);
-      this.transitionGoalTarget.set(0, 1.0, 0);
+      this.transitionGoalPos.set(11 * s, 7.5 * s, 13.5 * s);
+      this.transitionGoalTarget.set(0, THREE.MathUtils.lerp(1.0, -0.8, this.portraitT), 0);
     } else if (preset === 'podium') {
-      this.transitionGoalPos.set(0, 4.6, 9.8);
-      this.transitionGoalTarget.set(0, 1.5, 0);
+      this.transitionGoalPos.set(0, 4.6 * s, 9.8 * s);
+      this.transitionGoalTarget.set(0, THREE.MathUtils.lerp(1.5, 0.2, this.portraitT), 0);
     }
   }
 
@@ -757,9 +780,11 @@ export class ArenaScene {
     if (this.disposed) return;
     const w = this.container.clientWidth || window.innerWidth;
     const h = this.container.clientHeight || window.innerHeight;
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
+    this.updateCameraForViewport(w, h);
     this.renderer.setSize(w, h);
+    if (this.inRoom && !this.userInteractingCamera && this.cameraPreset !== 'follow') {
+      this.setCameraPreset(this.cameraPreset);
+    }
   };
 
   private handleKeyDown = (e: KeyboardEvent) => {
@@ -784,26 +809,52 @@ export class ArenaScene {
     this.pointerDownPos.y = e.clientY;
   };
 
+  private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private groundHitPoint = new THREE.Vector3();
+
   private handlePointerUp = (e: PointerEvent) => {
     // Only treat as click if pointer didn't drag
     const dx = e.clientX - this.pointerDownPos.x;
     const dy = e.clientY - this.pointerDownPos.y;
     if (dx * dx + dy * dy > 36) return;
-    if (this.phase !== 'question' || !this.localPlayerId) return;
+    if (!this.inRoom || !this.localPlayerId || this.phase === 'podium') return;
 
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.pointerNdc, this.camera);
-    const hits = this.raycaster.intersectObjects(
-      this.padGroups.map((p) => p.hitMesh),
-      false,
-    );
-    if (hits.length > 0) {
-      const idx = hits[0].object.userData.padIndex as 0 | 1 | 2 | 3;
-      this.moveLocalPlayerToPad(idx);
-      this.callbacks.onPadSelect(idx);
+
+    if (this.phase === 'question') {
+      const hits = this.raycaster.intersectObjects(
+        this.padGroups.map((p) => p.hitMesh),
+        false,
+      );
+      if (hits.length > 0) {
+        const idx = hits[0].object.userData.padIndex as 0 | 1 | 2 | 3;
+        this.moveLocalPlayerToPad(idx);
+        this.callbacks.onPadSelect(idx);
+        return;
+      }
+    }
+
+    // Tap anywhere on the island to hop/move there (great for mobile touch!)
+    if (this.raycaster.ray.intersectPlane(this.groundPlane, this.groundHitPoint)) {
+      const dist = Math.hypot(this.groundHitPoint.x, this.groundHitPoint.z);
+      if (dist <= 14.5) {
+        const ent = this.playersMap.get(this.localPlayerId);
+        if (ent) {
+          const targetX = THREE.MathUtils.clamp(this.groundHitPoint.x, -13.2, 13.2);
+          const targetZ = THREE.MathUtils.clamp(this.groundHitPoint.z, -13.2, 13.2);
+          ent.rotY = Math.atan2(targetX - ent.x, targetZ - ent.z);
+          ent.x = targetX;
+          ent.z = targetZ;
+          ent.vy = 5.2;
+          ent.squash = 1.24;
+          soundEngine.playJump();
+          this.callbacks.onLocalMove(ent.x, ent.z, ent.rotY, ent.vy);
+        }
+      }
     }
   };
 
@@ -1066,15 +1117,23 @@ export class ArenaScene {
     if (!this.inRoom) {
       // Gentle cinematic title screen orbit
       const camAngle = elapsed * 0.14;
-      this.camera.position.set(Math.sin(camAngle) * 19, 9.5, Math.cos(camAngle) * 19);
+      const orbitRadius = 19 * this.portraitScale;
+      const orbitHeight = 9.5 * (0.7 + 0.3 * this.portraitScale);
+      this.camera.position.set(
+        Math.sin(camAngle) * orbitRadius,
+        orbitHeight,
+        Math.cos(camAngle) * orbitRadius,
+      );
       this.controls.target.set(0, 1.0, 0);
       this.controls.update();
     } else if (!this.userInteractingCamera) {
       if (this.cameraPreset === 'follow' && this.localPlayerId && this.phase !== 'podium') {
         const local = this.playersMap.get(this.localPlayerId);
         if (local) {
-          _vec3.set(local.x, 10.5, local.z + 12.5);
-          _vec3B.set(local.x, 0.8, local.z);
+          const followY = 10.5 * (0.65 + 0.35 * this.portraitScale);
+          const followZ = 12.5 * this.portraitScale;
+          _vec3.set(local.x, followY, local.z + followZ);
+          _vec3B.set(local.x, THREE.MathUtils.lerp(0.8, -0.8, this.portraitT), local.z);
           this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _vec3.x, 4.5, dt);
           this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, _vec3.y, 4.5, dt);
           this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, _vec3.z, 4.5, dt);

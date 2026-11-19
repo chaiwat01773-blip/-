@@ -2,8 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import {
   type BlookAvatarId,
+  type GameMode,
   type GameStateSnapshot,
+  type LogicPuzzle,
   type QuizQuestion,
+  type ZombieBreachEvent,
+  type ZombieGameSnapshot,
+  type ZombieShotEvent,
+  type ZombieWrongEvent,
 } from './shared/types.ts';
 import { BUILTIN_QUESTION_PACKS } from './shared/questionPacks.ts';
 import { soundEngine } from './audio/soundEngine.ts';
@@ -13,6 +19,7 @@ import { HomeOverlay } from './components/HomeOverlay.tsx';
 import { HostLobbyOverlay } from './components/HostLobbyOverlay.tsx';
 import { PlayerLobbyOverlay } from './components/PlayerLobbyOverlay.tsx';
 import { GameHudOverlay } from './components/GameHudOverlay.tsx';
+import { ZombieGameView } from './components/ZombieGameView.tsx';
 
 export default function App() {
   const socketRef = useRef<Socket | null>(null);
@@ -26,6 +33,12 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('arena');
+  const [zombieAvatar, setZombieAvatar] = useState<BlookAvatarId | null>(null);
+  const [hostAvatar, setHostAvatar] = useState<BlookAvatarId>('robot');
+  const [mpZombieState, setMpZombieState] = useState<ZombieGameSnapshot | null>(null);
+  const [mpZombieShot, setMpZombieShot] = useState<ZombieShotEvent | null>(null);
+  const [mpZombieWrong, setMpZombieWrong] = useState<ZombieWrongEvent | null>(null);
+  const [mpZombieBreach, setMpZombieBreach] = useState<ZombieBreachEvent | null>(null);
 
   const prevPhaseRef = useRef<string | null>(null);
   const prevPlayerCountRef = useRef<number>(0);
@@ -52,19 +65,52 @@ export default function App() {
 
     socket.on('connect', () => {
       setConnected(true);
+      try {
+        const saved = sessionStorage.getItem('blooklobby_host');
+        if (saved) {
+          const parsed = JSON.parse(saved) as { pin?: string; hostToken?: string };
+          if (parsed.pin && parsed.hostToken) {
+            socket.emit('reclaim_host', { pin: parsed.pin, hostToken: parsed.hostToken });
+          }
+        }
+      } catch {
+        // ignore storage errors
+      }
     });
 
     socket.on('disconnect', () => {
       setConnected(false);
     });
 
-    socket.on('room_created', (payload: { pin: string; snapshot: GameStateSnapshot }) => {
-      setRole('host');
-      setPlayerId(null);
-      setJoinError(null);
-      setSnapshot(payload.snapshot);
-      setCameraPreset('arena');
-      soundEngine.playJoin();
+    socket.on(
+      'room_created',
+      (payload: { pin: string; hostToken?: string; snapshot: GameStateSnapshot }) => {
+        if (payload.hostToken) {
+          try {
+            sessionStorage.setItem(
+              'blooklobby_host',
+              JSON.stringify({ pin: payload.pin, hostToken: payload.hostToken }),
+            );
+          } catch {
+            // ignore
+          }
+        }
+        setRole('host');
+        setPlayerId(null);
+        setJoinError(null);
+        setSnapshot(payload.snapshot);
+        setMpZombieState(payload.snapshot.zombieState);
+        setCameraPreset('arena');
+        soundEngine.playJoin();
+      },
+    );
+
+    socket.on('host_reclaim_failed', () => {
+      try {
+        sessionStorage.removeItem('blooklobby_host');
+      } catch {
+        // ignore
+      }
     });
 
     socket.on(
@@ -75,6 +121,7 @@ export default function App() {
         setPlayerId(payload.playerId);
         setJoinError(null);
         setSnapshot(payload.snapshot);
+        setMpZombieState(payload.snapshot.zombieState);
         setCameraPreset('follow');
         soundEngine.playJoin();
       },
@@ -87,6 +134,30 @@ export default function App() {
 
     socket.on('game_state', (nextState: GameStateSnapshot) => {
       setSnapshot(nextState);
+      if (nextState.phase === 'zombie') {
+        setMpZombieState(nextState.zombieState);
+      } else {
+        setMpZombieState(null);
+        setMpZombieShot(null);
+        setMpZombieWrong(null);
+        setMpZombieBreach(null);
+      }
+    });
+
+    socket.on('zombie_state', (zSnap: ZombieGameSnapshot) => {
+      setMpZombieState(zSnap);
+    });
+
+    socket.on('zombie_shot', (shot: ZombieShotEvent) => {
+      setMpZombieShot(shot);
+    });
+
+    socket.on('zombie_wrong', (wrong: ZombieWrongEvent) => {
+      setMpZombieWrong(wrong);
+    });
+
+    socket.on('zombie_breach', (breach: ZombieBreachEvent) => {
+      setMpZombieBreach(breach);
     });
 
     socket.on(
@@ -97,9 +168,15 @@ export default function App() {
     );
 
     socket.on('room_closed', (payload: { message: string }) => {
+      try {
+        sessionStorage.removeItem('blooklobby_host');
+      } catch {
+        // ignore
+      }
       setRole(null);
       setPlayerId(null);
       setSnapshot(null);
+      setMpZombieState(null);
       showToast(payload.message);
     });
 
@@ -107,6 +184,7 @@ export default function App() {
       setRole(null);
       setPlayerId(null);
       setSnapshot(null);
+      setMpZombieState(null);
       showToast(payload.message);
       soundEngine.playWrong();
     });
@@ -157,11 +235,15 @@ export default function App() {
     });
   }, []);
 
-  const handleCreateRoom = useCallback((packId: string) => {
-    soundEngine.playClick();
-    const pack = BUILTIN_QUESTION_PACKS.find((p) => p.id === packId) || BUILTIN_QUESTION_PACKS[0];
-    socketRef.current?.emit('create_room', { pack });
-  }, []);
+  const handleCreateRoom = useCallback(
+    (packId: string, mode: GameMode, chosenAvatar: BlookAvatarId) => {
+      soundEngine.playClick();
+      setHostAvatar(chosenAvatar);
+      const pack = BUILTIN_QUESTION_PACKS.find((p) => p.id === packId) || BUILTIN_QUESTION_PACKS[0];
+      socketRef.current?.emit('create_room', { pack, mode, hostAvatar: chosenAvatar });
+    },
+    [],
+  );
 
   const handleJoinRoom = useCallback(
     (pin: string, name: string, avatar: BlookAvatarId) => {
@@ -174,10 +256,16 @@ export default function App() {
 
   const handleLeaveOrClose = useCallback(() => {
     soundEngine.playClick();
+    try {
+      sessionStorage.removeItem('blooklobby_host');
+    } catch {
+      // ignore
+    }
     socketRef.current?.emit('leave_room');
     setRole(null);
     setPlayerId(null);
     setSnapshot(null);
+    setMpZombieState(null);
     setCameraPreset('arena');
   }, []);
 
@@ -190,12 +278,46 @@ export default function App() {
     [snapshot],
   );
 
+  const handleChangeMode = useCallback(
+    (mode: GameMode) => {
+      if (!snapshot) return;
+      soundEngine.playClick();
+      socketRef.current?.emit('set_game_mode', { pin: snapshot.pin, mode });
+    },
+    [snapshot],
+  );
+
+  const handleChangeHostAvatar = useCallback(
+    (avatar: BlookAvatarId) => {
+      soundEngine.playClick();
+      setHostAvatar(avatar);
+      if (!snapshot) return;
+      socketRef.current?.emit('set_host_avatar', { pin: snapshot.pin, avatar });
+    },
+    [snapshot],
+  );
+
   const handleUpdatePack = useCallback(
     (title: string, questions: QuizQuestion[]) => {
       if (!snapshot) return;
       soundEngine.playClick();
       socketRef.current?.emit('update_pack', { pin: snapshot.pin, title, questions });
       showToast('อัปเดตชุดคำถามเรียบร้อยแล้ว!');
+    },
+    [snapshot, showToast],
+  );
+
+  const handleUpdateZombiePuzzles = useCallback(
+    (title: string, puzzles: LogicPuzzle[], autoFill: boolean) => {
+      if (!snapshot) return;
+      soundEngine.playClick();
+      socketRef.current?.emit('update_zombie_puzzles', {
+        pin: snapshot.pin,
+        title,
+        puzzles,
+        autoFill,
+      });
+      showToast('อัปเดตโจทย์ซอมบี้เรียบร้อยแล้ว!');
     },
     [snapshot, showToast],
   );
@@ -240,10 +362,72 @@ export default function App() {
     socketRef.current?.emit('restart_lobby', { pin: snapshot.pin });
   }, [snapshot]);
 
+  const handleMpZombieShoot = useCallback(
+    (targetZombieId: string | null, answer: string, explosive: boolean) => {
+      socketRef.current?.emit('zombie_shoot', { targetZombieId, answer, explosive });
+    },
+    [],
+  );
+
+  const handleMpZombiePause = useCallback(
+    (paused: boolean) => {
+      if (!snapshot) return;
+      socketRef.current?.emit('zombie_pause', { pin: snapshot.pin, paused });
+    },
+    [snapshot],
+  );
+
+  const handleMpZombieRestart = useCallback(() => {
+    if (!snapshot) return;
+    soundEngine.playClick();
+    socketRef.current?.emit('zombie_restart', { pin: snapshot.pin });
+  }, [snapshot]);
+
   const inRoom = Boolean(snapshot && role);
+  const inSoloZombie = !inRoom && zombieAvatar !== null;
+  const inMpZombie = Boolean(inRoom && snapshot?.phase === 'zombie' && role);
+
+  if (inMpZombie && snapshot && role) {
+    const localDefenderId = role === 'host' ? 'host' : playerId || 'local';
+    const me = snapshot.players.find((p) => p.id === playerId);
+    const localAvatar: BlookAvatarId = role === 'host' ? hostAvatar : me?.avatar || 'fox';
+
+    return (
+      <ZombieGameView
+        avatarId={localAvatar}
+        muted={muted}
+        onToggleMute={handleToggleMute}
+        onExit={handleLeaveOrClose}
+        multiplayer={{
+          pin: snapshot.pin,
+          role,
+          localDefenderId,
+          zombieState: mpZombieState || snapshot.zombieState,
+          lastShot: mpZombieShot,
+          lastWrong: mpZombieWrong,
+          lastBreach: mpZombieBreach,
+          onShoot: handleMpZombieShoot,
+          onPauseToggle: handleMpZombiePause,
+          onRestart: handleMpZombieRestart,
+          onBackToLobby: handleRestartLobby,
+        }}
+      />
+    );
+  }
+
+  if (inSoloZombie && zombieAvatar) {
+    return (
+      <ZombieGameView
+        avatarId={zombieAvatar}
+        muted={muted}
+        onToggleMute={handleToggleMute}
+        onExit={() => setZombieAvatar(null)}
+      />
+    );
+  }
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden select-none">
+    <div className="relative w-full h-dvh overflow-hidden select-none">
       {/* Persistent Full-Bleed Three.js 3D Arena Canvas */}
       <ThreeArenaCanvas
         inRoom={inRoom}
@@ -278,18 +462,26 @@ export default function App() {
           onToggleMute={handleToggleMute}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
+          onStartZombieMode={(av) => {
+            soundEngine.playClick();
+            setZombieAvatar(av);
+          }}
         />
       )}
 
       {inRoom && snapshot?.phase === 'lobby' && role === 'host' && (
         <HostLobbyOverlay
           snapshot={snapshot}
+          hostAvatar={hostAvatar}
           muted={muted}
           onToggleMute={handleToggleMute}
+          onChangeMode={handleChangeMode}
+          onChangeHostAvatar={handleChangeHostAvatar}
           onStartGame={handleStartGame}
           onCloseRoom={handleLeaveOrClose}
           onKickPlayer={handleKickPlayer}
           onUpdatePack={handleUpdatePack}
+          onUpdateZombiePuzzles={handleUpdateZombiePuzzles}
         />
       )}
 

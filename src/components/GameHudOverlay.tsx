@@ -105,35 +105,36 @@ export function GameHudOverlay({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `blooklobby-${snapshot.pin}-scores.csv`;
+    a.download = `math-quiz-${snapshot.pin}-scores.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   if (snapshot.phase === 'podium') {
     return (
-      <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-4 sm:p-6">
-        <header className="pointer-events-auto max-w-4xl w-full mx-auto flex items-center justify-between gap-3">
+      <div className="fixed inset-0 z-10 pointer-events-none overflow-y-auto custom-scroll ios-scroll-shell">
+        <div className="min-h-full flex flex-col justify-between gap-3 p-3 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        <header className="pointer-events-auto max-w-4xl w-full mx-auto flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 shrink-0">
           <div
-            className="rounded-2xl border border-amber-400/50 px-5 py-3 flex items-center gap-3 shadow-xl"
+            className="rounded-2xl border border-amber-400/50 px-4 py-2.5 sm:px-5 sm:py-3 flex items-center gap-3 shadow-xl"
             style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
           >
-            <Trophy className="w-6 h-6 text-amber-400" />
+            <Trophy className="w-5 h-5 sm:w-6 sm:h-6 text-amber-400 shrink-0" />
             <div>
-              <h2 className="font-display text-lg sm:text-xl font-black text-white leading-tight">
-                สรุปผลแชมป์ BlookLobby 3D
+              <h2 className="font-display text-base sm:text-xl font-black text-white leading-tight">
+                สรุปผลแชมป์ เกมตอบปัญหาคณิตศาสตร์
               </h2>
-              <p className="text-xs text-slate-300">
+              <p className="text-[11px] sm:text-xs text-slate-300">
                 ห้อง PIN {snapshot.pin} · {snapshot.packTitle}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleDownloadCsv}
-              className="px-3.5 py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              className="px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
             >
               <Download className="w-4 h-4" />
               ดาวน์โหลดผลคะแนน CSV
@@ -142,7 +143,7 @@ export function GameHudOverlay({
               <button
                 type="button"
                 onClick={onRestartLobby}
-                className="px-3.5 py-2.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                className="px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
                 <RotateCcw className="w-4 h-4" />
                 เล่นรอบใหม่
@@ -151,7 +152,7 @@ export function GameHudOverlay({
             <button
               type="button"
               onClick={onLeaveToHome}
-              className="px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900/95 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              className="px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl border border-slate-700 bg-slate-900/95 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
             >
               <Home className="w-4 h-4" />
               หน้าแรก
@@ -159,12 +160,12 @@ export function GameHudOverlay({
           </div>
         </header>
 
-        <footer className="pointer-events-auto max-w-3xl w-full mx-auto">
+        <footer className="pointer-events-auto max-w-3xl w-full mx-auto shrink-0">
           <div
-            className="rounded-2xl border border-slate-700/80 p-4 shadow-2xl"
+            className="rounded-2xl border border-slate-700/80 p-3 sm:p-4 shadow-2xl"
             style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
           >
-            <div className="text-xs font-bold text-slate-300 mb-2.5">ตารางอันดับคะแนนทั้งหมด</div>
+            <div className="text-xs font-bold text-slate-300 mb-2">ตารางอันดับคะแนนทั้งหมด</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-y-auto custom-scroll">
               {sortedPlayers.map((p, idx) => {
                 const av = BLOOK_AVATARS.find((a) => a.id === p.avatar);
@@ -192,48 +193,49 @@ export function GameHudOverlay({
             </div>
           </div>
         </footer>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-3 sm:p-5">
+    <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between gap-2 p-2 sm:p-5">
       {/* Top Perimeter HUD Bar */}
-      <header className="pointer-events-auto max-w-5xl w-full mx-auto flex flex-wrap items-center justify-between gap-2.5">
+      <header className="pointer-events-auto max-w-5xl w-full mx-auto flex flex-wrap items-center justify-between gap-1.5 sm:gap-2.5">
         {/* Left: Question Progress & Timer */}
         <div
-          className="rounded-xl border border-slate-700/80 px-4 py-2 flex items-center gap-4 shadow-lg"
+          className="rounded-xl border border-slate-700/80 px-2.5 py-1.5 sm:px-4 sm:py-2 flex items-center gap-2.5 sm:gap-4 shadow-lg"
           style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
         >
-          <div className="text-xs font-bold text-slate-300 tabular-nums">
-            ข้อ {(q?.index ?? 0) + 1} / {q?.total ?? snapshot.questionCount}
+          <div className="text-[11px] sm:text-xs font-bold text-slate-300 tabular-nums">
+            ข้อ {(q?.index ?? 0) + 1}/{q?.total ?? snapshot.questionCount}
           </div>
           <span className="text-slate-600">|</span>
           <div
-            className={`font-mono-tabular text-lg font-black ${
+            className={`font-mono-tabular text-sm sm:text-lg font-black ${
               secondsLeft <= 5 && snapshot.phase === 'question' ? 'text-rose-400' : 'text-cyan-400'
             }`}
           >
             {snapshot.phase === 'question' ? `${secondsLeft}s` : 'เฉลย'}
           </div>
           <span className="text-slate-600">|</span>
-          <div className="text-xs font-semibold text-slate-300 tabular-nums">
-            ตอบแล้ว {answeredCount}/{snapshot.players.length}
+          <div className="text-[11px] sm:text-xs font-semibold text-slate-300 tabular-nums">
+            ตอบ {answeredCount}/{snapshot.players.length}
           </div>
         </div>
 
         {/* Center/Right: Player Score or Host Controls & Camera Switcher */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {role === 'player' && me && (
             <div
-              className="rounded-xl border border-slate-700/80 px-3.5 py-2 flex items-center gap-3 shadow-lg"
+              className="rounded-xl border border-slate-700/80 px-2.5 py-1.5 sm:px-3.5 sm:py-2 flex items-center gap-2 sm:gap-3 shadow-lg"
               style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
             >
-              <span className="font-mono-tabular text-sm font-black text-amber-400">
+              <span className="font-mono-tabular text-xs sm:text-sm font-black text-amber-400">
                 {me.score.toLocaleString()} คะแนน
               </span>
               {me.streak > 1 && (
-                <span className="text-xs font-bold text-orange-400 flex items-center gap-0.5 tabular-nums">
+                <span className="text-[11px] sm:text-xs font-bold text-orange-400 flex items-center gap-0.5 tabular-nums">
                   <Flame className="w-3.5 h-3.5" />
                   x{me.streak}
                 </span>
@@ -274,18 +276,18 @@ export function GameHudOverlay({
                 <button
                   type="button"
                   onClick={onRevealAnswer}
-                  className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-[11px] sm:text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                 >
-                  <Eye className="w-4 h-4" />
+                  <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   เฉลยทันที
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={onNextQuestion}
-                  className="px-4 py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                 >
-                  <FastForward className="w-4 h-4" />
+                  <FastForward className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   {(q?.index ?? 0) + 1 >= (q?.total ?? 0) ? 'สรุปอันดับแชมป์' : 'ข้อถัดไป'}
                 </button>
               )}
@@ -296,7 +298,7 @@ export function GameHudOverlay({
             type="button"
             onClick={onToggleMute}
             aria-label={muted ? 'เปิดเสียง' : 'ปิดเสียง'}
-            className="p-2 rounded-xl border border-slate-700/80 text-slate-200 hover:text-white cursor-pointer"
+            className="p-1.5 sm:p-2 rounded-xl border border-slate-700/80 text-slate-200 hover:text-white cursor-pointer"
             style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
           >
             {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
@@ -306,7 +308,7 @@ export function GameHudOverlay({
             type="button"
             onClick={onLeaveToHome}
             title="ออกจากห้อง"
-            className="px-3 py-2 rounded-xl border border-rose-500/40 bg-rose-950/80 hover:bg-rose-900 text-rose-200 font-bold text-xs cursor-pointer"
+            className="px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl border border-rose-500/40 bg-rose-950/80 hover:bg-rose-900 text-rose-200 font-bold text-[11px] sm:text-xs cursor-pointer"
           >
             ออก
           </button>
@@ -327,18 +329,18 @@ export function GameHudOverlay({
 
         {!dockCollapsed && q && (
           <div
-            className="w-full rounded-2xl border border-slate-700/80 p-4 shadow-2xl space-y-3"
+            className="w-full rounded-2xl border border-slate-700/80 p-2.5 sm:p-4 shadow-2xl space-y-2 sm:space-y-3 max-h-[50dvh] sm:max-h-none overflow-y-auto touch-pan-y custom-scroll"
             style={{ backgroundColor: 'rgba(15, 23, 42, 0.94)' }}
           >
             {/* Question Prompt + Result Feedback */}
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-display text-base sm:text-xl font-bold text-white leading-snug">
+              <h2 className="font-display text-sm sm:text-xl font-bold text-white leading-snug whitespace-pre-line">
                 {q.prompt}
               </h2>
 
               {snapshot.phase === 'reveal' && role === 'player' && me && (
                 <div
-                  className={`px-3 py-1 rounded-lg text-xs font-extrabold tabular-nums ${
+                  className={`px-2.5 py-1 rounded-lg text-[11px] sm:text-xs font-extrabold tabular-nums ${
                     me.lastPointsEarned > 0
                       ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                       : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
@@ -353,14 +355,14 @@ export function GameHudOverlay({
               )}
 
               {snapshot.phase === 'question' && role === 'player' && me?.answeredCurrent && (
-                <div className="px-3 py-1 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-200 text-xs font-bold">
+                <div className="px-2.5 py-1 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-200 text-[11px] sm:text-xs font-bold">
                   ล็อกคำตอบแล้ว! รอเพื่อนคนอื่น...
                 </div>
               )}
             </div>
 
             {/* 4 Answer Cards matching 3D Pad Colors */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-2 gap-1.5 sm:gap-2.5">
               {ANSWER_PADS.map((pad) => {
                 const isCorrect = snapshot.correctIndex === pad.index;
                 const isSelected = me?.selectedOption === pad.index;
@@ -375,7 +377,7 @@ export function GameHudOverlay({
                     type="button"
                     disabled={!canClick}
                     onClick={() => onSubmitAnswer(pad.index)}
-                    className={`relative flex items-center justify-between gap-3 px-4 py-3 rounded-xl border text-left transition-all duration-150 ${
+                    className={`relative flex items-center justify-between gap-2 sm:gap-3 px-2.5 py-2 sm:px-4 sm:py-3 rounded-xl border text-left transition-all duration-150 ${
                       canClick ? 'cursor-pointer hover:brightness-110 active:scale-[0.99]' : 'cursor-default'
                     } ${dimmed ? 'opacity-45' : 'opacity-100'} ${
                       isSelected ? 'ring-2 ring-white' : ''
@@ -391,21 +393,21 @@ export function GameHudOverlay({
                           : 'rgba(30, 41, 59, 0.9)',
                     }}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                       <span
-                        className="w-8 h-8 rounded-lg font-display font-black text-sm text-white flex items-center justify-center shrink-0"
+                        className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg font-display font-black text-xs sm:text-sm text-white flex items-center justify-center shrink-0"
                         style={{ backgroundColor: pad.hexColor }}
                       >
                         {pad.letter}
                       </span>
-                      <span className="text-sm font-bold text-white truncate">
+                      <span className="text-xs sm:text-sm font-bold text-white break-words leading-snug">
                         {q.options[pad.index]}
                       </span>
                     </div>
 
                     {(snapshot.phase === 'reveal' || role === 'host') && (
-                      <span className="font-mono-tabular text-xs font-bold text-slate-300 shrink-0">
-                        {count} คน
+                      <span className="font-mono-tabular text-[10px] sm:text-xs font-bold text-slate-300 shrink-0">
+                        {count}
                       </span>
                     )}
                   </button>
@@ -415,7 +417,7 @@ export function GameHudOverlay({
 
             {/* Compact Live Top-4 Leaderboard strip during reveal */}
             {snapshot.phase === 'reveal' && sortedPlayers.length > 0 && (
-              <div className="pt-1 flex flex-wrap items-center gap-3 text-xs text-slate-300 border-t border-slate-800">
+              <div className="pt-1 flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-slate-300 border-t border-slate-800">
                 <span className="font-bold text-amber-400">อันดับล่าสุด:</span>
                 {sortedPlayers.slice(0, 4).map((p, idx) => {
                   const av = BLOOK_AVATARS.find((a) => a.id === p.avatar);

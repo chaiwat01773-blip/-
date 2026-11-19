@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { Play, Plus, QrCode, Users, Volume2, VolumeX } from 'lucide-react';
-import { BLOOK_AVATARS, type BlookAvatarId } from '../shared/types.ts';
+import { Crosshair, Play, Plus, QrCode, Users, Volume2, VolumeX } from 'lucide-react';
+import { BLOOK_AVATARS, type BlookAvatarId, type GameMode } from '../shared/types.ts';
 import { BUILTIN_QUESTION_PACKS } from '../shared/questionPacks.ts';
 
 interface HomeOverlayProps {
@@ -10,8 +10,9 @@ interface HomeOverlayProps {
   joinError: string | null;
   muted: boolean;
   onToggleMute: () => void;
-  onCreateRoom: (packId: string) => void;
+  onCreateRoom: (packId: string, mode: GameMode, hostAvatar: BlookAvatarId) => void;
   onJoinRoom: (pin: string, name: string, avatar: BlookAvatarId) => void;
+  onStartZombieMode: (avatar: BlookAvatarId) => void;
 }
 
 export function HomeOverlay({
@@ -23,10 +24,12 @@ export function HomeOverlay({
   onToggleMute,
   onCreateRoom,
   onJoinRoom,
+  onStartZombieMode,
 }: HomeOverlayProps) {
   const [pin, setPin] = useState(initialPin);
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState<BlookAvatarId>('fox');
+  const [hostMode, setHostMode] = useState<GameMode>('quiz');
   const [selectedPackId, setSelectedPackId] = useState(BUILTIN_QUESTION_PACKS[0].id);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -49,18 +52,19 @@ export function HomeOverlay({
   const displayError = localError || joinError;
 
   return (
-    <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-4 sm:p-6 overflow-y-auto custom-scroll">
+    <div className="fixed inset-0 z-10 pointer-events-none overflow-y-auto custom-scroll ios-scroll-shell">
+      <div className="min-h-full flex flex-col justify-between gap-3 p-3 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
       {/* Top Bar: Brand Lockup & Connection/Audio */}
-      <header className="pointer-events-auto flex items-center justify-between gap-4 max-w-5xl w-full mx-auto">
-        <div className="flex items-center gap-3">
+      <header className="pointer-events-auto flex flex-wrap items-center justify-between gap-2.5 sm:gap-4 max-w-5xl w-full mx-auto shrink-0">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <svg
-            width="42"
-            height="42"
+            width="38"
+            height="38"
             viewBox="0 0 48 48"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
             aria-hidden="true"
-            className="shrink-0"
+            className="shrink-0 sm:w-[42px] sm:h-[42px]"
           >
             <rect x="4" y="8" width="40" height="34" rx="10" fill="#0e7490" />
             <rect x="4" y="4" width="40" height="34" rx="10" fill="#06b6d4" />
@@ -75,19 +79,19 @@ export function HomeOverlay({
               strokeLinecap="round"
             />
           </svg>
-          <div>
-            <h1 className="font-display text-2xl sm:text-3xl font-black tracking-tight text-white leading-none">
-              BlookLobby 3D
+          <div className="min-w-0">
+            <h1 className="font-display text-xl sm:text-3xl font-black tracking-tight text-white leading-none">
+              เกมตอบปัญหาคณิตศาสตร์
             </h1>
-            <p className="text-xs sm:text-sm text-slate-300 mt-1">
-              ลานประลองตอบคำถาม 3 มิติแบบเรียลไทม์
+            <p className="text-[11px] sm:text-sm text-slate-300 mt-1">
+              ลานประลองตอบปัญหาคณิตศาสตร์ 3 มิติ & โหมดซอมบี้ตรรกศาสตร์แบบเรียลไทม์
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
           <span
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-700/80 text-slate-200 whitespace-nowrap"
+            className="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold border border-slate-700/80 text-slate-200 whitespace-nowrap"
             style={{ backgroundColor: 'rgba(15, 23, 42, 0.88)' }}
           >
             {connected ? 'เซิร์ฟเวอร์พร้อมใช้งาน' : 'กำลังเชื่อมต่อเซิร์ฟเวอร์...'}
@@ -105,8 +109,8 @@ export function HomeOverlay({
       </header>
 
       {/* Center Split Lobby Cards */}
-      <main className="pointer-events-auto w-full max-w-4xl mx-auto my-auto py-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
+      <main className="pointer-events-auto w-full max-w-4xl mx-auto my-auto py-2 sm:py-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 items-stretch">
           {/* Player Join Card */}
           <section
             className="rounded-2xl border border-slate-700/80 p-6 flex flex-col justify-between shadow-2xl"
@@ -216,55 +220,143 @@ export function HomeOverlay({
                 <Users className="w-5 h-5 text-amber-400" />
                 สำหรับผู้จัดกิจกรรม (Host)
               </h2>
-              <p className="text-sm text-slate-300 leading-relaxed mb-4">
-                สร้างห้องเกมเพื่อรับรหัส PIN 6 หลัก และ QR Code ให้ผู้เล่นสแกนเข้าลานประลอง 3 มิติได้ทันที
-                พร้อมตัวแก้ไขชุดคำถามและนำเข้าไฟล์ CSV
+              <p className="text-sm text-slate-300 leading-relaxed mb-3.5">
+                สร้างห้องเกมเพื่อรับรหัส PIN 6 หลัก และ QR Code ให้เพื่อนสแกนเข้าเล่นด้วยกันได้ทันที
+                พร้อมตัวแก้ไขโจทย์และนำเข้าไฟล์ CSV
               </p>
 
-              <div className="mb-4">
-                <label htmlFor="pack-select" className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  เลือกชุดคำถามเริ่มต้น
-                </label>
-                <select
-                  id="pack-select"
-                  value={selectedPackId}
-                  onChange={(e) => setSelectedPackId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/90 border border-slate-700 text-white text-sm focus:outline-none focus:border-amber-400"
-                >
-                  {BUILTIN_QUESTION_PACKS.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.title} ({p.questions.length} ข้อ)
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-400 mt-1.5">
-                  {BUILTIN_QUESTION_PACKS.find((p) => p.id === selectedPackId)?.description}
-                </p>
+              {/* Mode Selector inside Host Card */}
+              <div className="mb-3.5">
+                <span className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  เลือกโหมดเกมที่จะเปิดห้อง
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setHostMode('quiz')}
+                    className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition-colors cursor-pointer ${
+                      hostMode === 'quiz'
+                        ? 'border-amber-400 bg-amber-400/15 text-amber-300'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    ตอบคำถาม 3 มิติ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHostMode('zombie')}
+                    className={`px-3 py-2 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                      hostMode === 'zombie'
+                        ? 'border-emerald-400 bg-emerald-400/15 text-emerald-300'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    <Crosshair className="w-3.5 h-3.5" />
+                    ซอมบี้ (Co-op)
+                  </button>
+                </div>
               </div>
+
+              {hostMode === 'quiz' ? (
+                <div className="mb-4">
+                  <label htmlFor="pack-select" className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    เลือกชุดคำถามเริ่มต้น
+                  </label>
+                  <select
+                    id="pack-select"
+                    value={selectedPackId}
+                    onChange={(e) => setSelectedPackId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/90 border border-slate-700 text-white text-sm focus:outline-none focus:border-amber-400"
+                  >
+                    {BUILTIN_QUESTION_PACKS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title} ({p.questions.length} ข้อ)
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-400 mt-1.5">
+                    {BUILTIN_QUESTION_PACKS.find((p) => p.id === selectedPackId)?.description}
+                  </p>
+                </div>
+              ) : (
+                <div className="mb-4 rounded-xl border border-emerald-500/35 bg-emerald-950/40 p-3 text-xs text-emerald-100 space-y-1">
+                  <div className="font-bold text-emerald-300">
+                    โหมดซอมบี้ตรรกศาสตร์ Co-op (เล่นด้วยกัน & แก้โจทย์ได้)
+                  </div>
+                  <p className="text-slate-300 leading-relaxed">
+                    ผู้สร้างและเพื่อนจะยืนป้องกันฐานร่วมกัน! สามารถเพิ่ม/แก้ไขโจทย์ซอมบี้ (Easy / Medium / Hard) หรือนำเข้า CSV ได้ในหน้าห้องรอ
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2.5 pt-2">
               <button
                 type="button"
                 disabled={!connected}
-                onClick={() => onCreateRoom(selectedPackId)}
-                className="w-full py-3 px-4 rounded-xl font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                onClick={() => onCreateRoom(selectedPackId, hostMode, avatar)}
+                className={`w-full py-3 px-4 rounded-xl font-bold text-slate-950 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 cursor-pointer ${
+                  hostMode === 'zombie'
+                    ? 'bg-emerald-400 hover:bg-emerald-300'
+                    : 'bg-amber-400 hover:bg-amber-300'
+                }`}
               >
                 <Plus className="w-5 h-5" />
-                สร้างห้องใหม่ (Create Room)
+                {hostMode === 'zombie' ? 'สร้างห้องโหมดซอมบี้ (Create Room)' : 'สร้างห้องใหม่ (Create Room)'}
               </button>
-              <p className="text-xs text-slate-400 text-center">
-                ลากเมาส์เพื่อหมุนดูเกาะลอยฟ้า 3 มิติได้ตลอดเวลา
-              </p>
+              {window.location.hostname.startsWith('ais-dev-') ? (
+                <div className="rounded-xl border border-amber-400/40 bg-[#000000] p-2.5 text-center space-y-1.5">
+                  <p className="text-[11px] text-amber-200 font-semibold">
+                    ต้องการให้เพื่อนเข้าเล่นด้วย? เปิดหน้า Shared App เพื่อสร้างห้องบนเซิร์ฟเวอร์เดียวกับเพื่อน:
+                  </p>
+                  <a
+                    href={`${window.location.protocol}//${window.location.hostname.replace(/^ais-dev-/, 'ais-pre-')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-block px-3 py-1.5 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/50 text-amber-200 text-xs font-bold transition-colors"
+                  >
+                    เปิดหน้า Shared App (สำหรับเล่นกับเพื่อน)
+                  </a>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 text-center">
+                  ลากเมาส์เพื่อหมุนดูเกาะลอยฟ้า 3 มิติได้ตลอดเวลา
+                </p>
+              )}
             </div>
           </section>
         </div>
+
+        {/* Solo Logic Zombie Defense Quick-Play Banner */}
+        <section
+          className="mt-4 rounded-2xl border border-emerald-500/40 p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 shadow-2xl"
+          style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
+        >
+          <div className="space-y-1 max-w-xl">
+            <h2 className="font-display text-lg font-extrabold text-white flex items-center gap-2">
+              <Crosshair className="w-5 h-5 text-emerald-400" />
+              โหมดซอมบี้ตรรกศาสตร์ (ซ้อมเล่นคนเดียว / Solo)
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-300">
+              ซอมบี้โจทย์ตรรกศาสตร์ & Maths กำลังบุก! เลือกช้อยคำตอบที่ถูกเพื่อยิงปืน (ตอบผิดซอมบี้จะวิ่งเร็วขึ้นและเปลี่ยนโจทย์ใหม่ · เล่นถึง Wave 3 พบ Boss Zombie 5 คำถาม!)
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onStartZombieMode(avatar)}
+            className="px-5 py-3 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-sm flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Crosshair className="w-4 h-4" />
+            เล่นคนเดียวทันที
+          </button>
+        </section>
       </main>
 
       {/* Single flat control-hint line */}
-      <footer className="pointer-events-none text-center text-xs text-slate-300/90 max-w-3xl mx-auto">
+      <footer className="pointer-events-none text-center text-xs text-slate-300/90 max-w-3xl mx-auto shrink-0">
         WASD / ลูกศร เดินในลานประลอง · Space กระโดด · คลิกแท่นคำตอบ A-D หรือกด 1-4 เพื่อตอบ · ลากเมาส์หมุนกล้อง
       </footer>
+      </div>
     </div>
   );
 }
