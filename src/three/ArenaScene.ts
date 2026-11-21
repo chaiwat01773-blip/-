@@ -71,6 +71,8 @@ export class ArenaScene {
 
   private portraitScale = 1;
   private portraitT = 0;
+  private splitViewportMode = false;
+  private resizeObserver: ResizeObserver | null = null;
 
   private frameId = 0;
   private disposed = false;
@@ -637,7 +639,7 @@ export class ArenaScene {
           castShadow: !this.isSoftwareGl,
         });
         rig.root.position.set(p.x, 0, p.z);
-        rig.root.rotation.y = p.rotY;
+        rig.bodyPivot.rotation.y = p.rotY;
         this.scene.add(rig.root);
 
         ent = {
@@ -674,22 +676,27 @@ export class ArenaScene {
 
       if (params.phase === 'podium') {
         const rankIdx = sorted.findIndex((s) => s.id === p.id);
+        if (prevPhase !== 'podium') {
+          ent.y = 0;
+          ent.vy = 0;
+          ent.squash = 1;
+        }
+        ent.targetRotY = 0;
         if (rankIdx === 0) {
           ent.targetX = 0;
           ent.targetZ = 0;
-          ent.targetRotY = 0;
         } else if (rankIdx === 1) {
           ent.targetX = -2.4;
           ent.targetZ = 0;
-          ent.targetRotY = 0.15;
         } else if (rankIdx === 2) {
           ent.targetX = 2.4;
           ent.targetZ = 0;
-          ent.targetRotY = -0.15;
         } else {
-          ent.targetX = p.x;
-          ent.targetZ = Math.max(4.5, p.z);
-          ent.targetRotY = Math.PI;
+          const extraIdx = Math.max(0, rankIdx - 3);
+          const side = extraIdx % 2 === 0 ? -1 : 1;
+          const row = Math.floor(extraIdx / 2);
+          ent.targetX = side * (4.1 + row * 1.7);
+          ent.targetZ = 2.2 + row * 0.8;
         }
       } else if (!isLocal || prevPhase !== params.phase) {
         ent.targetX = p.x;
@@ -718,16 +725,26 @@ export class ArenaScene {
     const aspect = Math.max(1, w) / Math.max(1, h);
     this.portraitT = THREE.MathUtils.clamp((1.1 - aspect) / (1.1 - 0.45), 0, 1);
     this.camera.aspect = aspect;
-    this.camera.fov = THREE.MathUtils.lerp(48, 58, this.portraitT);
+    this.camera.fov = this.splitViewportMode
+      ? THREE.MathUtils.lerp(48, 56, this.portraitT)
+      : THREE.MathUtils.lerp(48, 58, this.portraitT);
     this.camera.updateProjectionMatrix();
 
-    this.portraitScale = THREE.MathUtils.lerp(1, 1.75, this.portraitT);
+    this.portraitScale = this.splitViewportMode
+      ? THREE.MathUtils.lerp(1, 1.48, this.portraitT)
+      : THREE.MathUtils.lerp(1, 1.75, this.portraitT);
     if (this.controls) {
       this.controls.maxDistance = Math.round(42 * this.portraitScale);
     }
     if (this.fog) {
       this.fog.density = 0.0135 / Math.sqrt(this.portraitScale);
     }
+  }
+
+  public setSplitViewportMode(split: boolean) {
+    if (this.splitViewportMode === split) return;
+    this.splitViewportMode = split;
+    this.handleResize();
   }
 
   public setCameraPreset(preset: CameraPreset) {
@@ -738,10 +755,18 @@ export class ArenaScene {
 
     if (preset === 'arena') {
       this.transitionGoalPos.set(0, 14.5 * s, 20.5 * s);
-      this.transitionGoalTarget.set(0, THREE.MathUtils.lerp(0.8, -1.4, this.portraitT), 0);
+      this.transitionGoalTarget.set(
+        0,
+        this.splitViewportMode ? 0.65 : THREE.MathUtils.lerp(0.8, -1.4, this.portraitT),
+        0,
+      );
     } else if (preset === 'stage') {
       this.transitionGoalPos.set(11 * s, 7.5 * s, 13.5 * s);
-      this.transitionGoalTarget.set(0, THREE.MathUtils.lerp(1.0, -0.8, this.portraitT), 0);
+      this.transitionGoalTarget.set(
+        0,
+        this.splitViewportMode ? 0.85 : THREE.MathUtils.lerp(1.0, -0.8, this.portraitT),
+        0,
+      );
     } else if (preset === 'podium') {
       this.transitionGoalPos.set(0, 4.6 * s, 9.8 * s);
       this.transitionGoalTarget.set(0, THREE.MathUtils.lerp(1.5, 0.2, this.portraitT), 0);
@@ -763,6 +788,10 @@ export class ArenaScene {
 
   private bindEvents() {
     window.addEventListener('resize', this.handleResize);
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.handleResize());
+      this.resizeObserver.observe(this.container);
+    }
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
     window.addEventListener('blur', this.handleWindowBlur);
@@ -1133,7 +1162,11 @@ export class ArenaScene {
           const followY = 10.5 * (0.65 + 0.35 * this.portraitScale);
           const followZ = 12.5 * this.portraitScale;
           _vec3.set(local.x, followY, local.z + followZ);
-          _vec3B.set(local.x, THREE.MathUtils.lerp(0.8, -0.8, this.portraitT), local.z);
+          _vec3B.set(
+            local.x,
+            this.splitViewportMode ? 0.65 : THREE.MathUtils.lerp(0.8, -0.8, this.portraitT),
+            local.z,
+          );
           this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _vec3.x, 4.5, dt);
           this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, _vec3.y, 4.5, dt);
           this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, _vec3.z, 4.5, dt);
@@ -1193,6 +1226,8 @@ export class ArenaScene {
     cancelAnimationFrame(this.frameId);
     clearTimeout(this.frameId);
 
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     window.removeEventListener('resize', this.handleResize);
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);

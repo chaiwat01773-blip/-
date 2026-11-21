@@ -42,10 +42,72 @@ export interface QuestionPack {
   questions: QuizQuestion[];
 }
 
+export type TeamId = 'A' | 'B' | 'C' | 'D';
+
+export interface TeamDefinition {
+  id: TeamId;
+  label: string;
+  shortLabel: string;
+  hexColor: string;
+  colorNum: number;
+  borderClass: string;
+  bgClass: string;
+  textClass: string;
+  badgeClass: string;
+}
+
+export const TEAM_DEFS: TeamDefinition[] = [
+  {
+    id: 'A',
+    label: 'ทีม A',
+    shortLabel: 'A',
+    hexColor: '#ef4444',
+    colorNum: 0xef4444,
+    borderClass: 'border-rose-400',
+    bgClass: 'bg-rose-500/20',
+    textClass: 'text-rose-300',
+    badgeClass: 'bg-rose-500 text-white',
+  },
+  {
+    id: 'B',
+    label: 'ทีม B',
+    shortLabel: 'B',
+    hexColor: '#06b6d4',
+    colorNum: 0x06b6d4,
+    borderClass: 'border-cyan-400',
+    bgClass: 'bg-cyan-500/20',
+    textClass: 'text-cyan-300',
+    badgeClass: 'bg-cyan-400 text-slate-950',
+  },
+  {
+    id: 'C',
+    label: 'ทีม C',
+    shortLabel: 'C',
+    hexColor: '#f59e0b',
+    colorNum: 0xf59e0b,
+    borderClass: 'border-amber-400',
+    bgClass: 'bg-amber-500/20',
+    textClass: 'text-amber-300',
+    badgeClass: 'bg-amber-400 text-slate-950',
+  },
+  {
+    id: 'D',
+    label: 'ทีม D',
+    shortLabel: 'D',
+    hexColor: '#22c55e',
+    colorNum: 0x22c55e,
+    borderClass: 'border-emerald-400',
+    bgClass: 'bg-emerald-500/20',
+    textClass: 'text-emerald-300',
+    badgeClass: 'bg-emerald-400 text-slate-950',
+  },
+];
+
 export interface PlayerPublicState {
   id: string;
   name: string;
   avatar: BlookAvatarId;
+  team?: TeamId;
   score: number;
   streak: number;
   lastPointsEarned: number;
@@ -57,7 +119,7 @@ export interface PlayerPublicState {
   vy: number;
 }
 
-export type GameMode = 'quiz' | 'zombie';
+export type GameMode = 'quiz' | 'zombie' | 'zombie_teams';
 
 export type GamePhase = 'lobby' | 'question' | 'reveal' | 'podium' | 'zombie';
 
@@ -100,6 +162,7 @@ export interface ZombieDefenderPublic {
 }
 
 export interface ZombieShotEvent {
+  teamId?: TeamId;
   shooterId: string;
   shooterName: string;
   shooterZ: number;
@@ -117,6 +180,7 @@ export interface ZombieShotEvent {
 }
 
 export interface ZombieWrongEvent {
+  teamId?: TeamId;
   shooterId: string;
   shooterName: string;
   zombieId: string;
@@ -125,6 +189,7 @@ export interface ZombieWrongEvent {
 }
 
 export interface ZombieBreachEvent {
+  teamId?: TeamId;
   zombieId: string;
   x: number;
   z: number;
@@ -135,6 +200,7 @@ export interface ZombieBreachEvent {
 }
 
 export interface ZombieGameSnapshot {
+  teamId?: TeamId;
   hp: number;
   maxHp: number;
   teamScore: number;
@@ -146,6 +212,12 @@ export interface ZombieGameSnapshot {
   zombies: ZombieEntityPublic[];
   defenders: ZombieDefenderPublic[];
   serverTime: number;
+}
+
+export interface TeamZombieGameEntry {
+  teamId: TeamId;
+  memberCount: number;
+  snapshot: ZombieGameSnapshot;
 }
 
 export interface PublicQuestionPayload {
@@ -180,6 +252,7 @@ export interface GameStateSnapshot {
   zombiePuzzles: LogicPuzzle[];
   zombieAutoFill: boolean;
   zombieState: ZombieGameSnapshot | null;
+  zombieTeamsState?: TeamZombieGameEntry[] | null;
 }
 
 export const ANSWER_PADS: Array<{

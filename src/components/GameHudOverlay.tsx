@@ -26,6 +26,8 @@ interface GameHudOverlayProps {
   playerId: string | null;
   muted: boolean;
   cameraPreset: CameraPreset;
+  dockCollapsed: boolean;
+  onToggleDockCollapsed: () => void;
   onChangeCamera: (preset: CameraPreset) => void;
   onToggleMute: () => void;
   onSubmitAnswer: (optionIndex: 0 | 1 | 2 | 3) => void;
@@ -41,6 +43,8 @@ export function GameHudOverlay({
   playerId,
   muted,
   cameraPreset,
+  dockCollapsed,
+  onToggleDockCollapsed,
   onChangeCamera,
   onToggleMute,
   onSubmitAnswer,
@@ -50,7 +54,6 @@ export function GameHudOverlay({
   onLeaveToHome,
 }: GameHudOverlayProps) {
   const [secondsLeft, setSecondsLeft] = useState(0);
-  const [dockCollapsed, setDockCollapsed] = useState(false);
 
   const me = playerId ? snapshot.players.find((p) => p.id === playerId) : undefined;
   const q = snapshot.question;
@@ -83,7 +86,7 @@ export function GameHudOverlay({
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.key === 'h' || e.key === 'H') {
-        setDockCollapsed((prev) => !prev);
+        onToggleDockCollapsed();
       }
       if (role === 'player' && snapshot.phase === 'question' && !me?.answeredCurrent) {
         if (e.key === '1') onSubmitAnswer(0);
@@ -94,7 +97,7 @@ export function GameHudOverlay({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [role, snapshot.phase, me?.answeredCurrent, onSubmitAnswer]);
+  }, [role, snapshot.phase, me?.answeredCurrent, onSubmitAnswer, onToggleDockCollapsed]);
 
   const handleDownloadCsv = () => {
     const header = 'Rank,Name,Avatar,Score,Streak\n';
@@ -114,324 +117,343 @@ export function GameHudOverlay({
     return (
       <div className="fixed inset-0 z-10 pointer-events-none overflow-y-auto custom-scroll ios-scroll-shell">
         <div className="min-h-full flex flex-col justify-between gap-3 p-3 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-        <header className="pointer-events-auto max-w-4xl w-full mx-auto flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 shrink-0">
-          <div
-            className="rounded-2xl border border-amber-400/50 px-4 py-2.5 sm:px-5 sm:py-3 flex items-center gap-3 shadow-xl"
-            style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
-          >
-            <Trophy className="w-5 h-5 sm:w-6 sm:h-6 text-amber-400 shrink-0" />
-            <div>
-              <h2 className="font-display text-base sm:text-xl font-black text-white leading-tight">
-                สรุปผลแชมป์ เกมตอบปัญหาคณิตศาสตร์
-              </h2>
-              <p className="text-[11px] sm:text-xs text-slate-300">
-                ห้อง PIN {snapshot.pin} · {snapshot.packTitle}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleDownloadCsv}
-              className="px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+          <header className="pointer-events-auto max-w-4xl w-full mx-auto flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 shrink-0">
+            <div
+              className="rounded-2xl border border-amber-400/50 px-4 py-2.5 sm:px-5 sm:py-3 flex items-center gap-3 shadow-xl"
+              style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
             >
-              <Download className="w-4 h-4" />
-              ดาวน์โหลดผลคะแนน CSV
-            </button>
-            {role === 'host' && (
+              <Trophy className="w-5 h-5 sm:w-6 sm:h-6 text-amber-400 shrink-0" />
+              <div>
+                <h2 className="font-display text-base sm:text-xl font-black text-white leading-tight">
+                  สรุปผลแชมป์ เกมตอบปัญหาคณิตศาสตร์
+                </h2>
+                <p className="text-[11px] sm:text-xs text-slate-300">
+                  ห้อง PIN {snapshot.pin} · {snapshot.packTitle}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={onRestartLobby}
-                className="px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                onClick={handleDownloadCsv}
+                className="px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
-                <RotateCcw className="w-4 h-4" />
-                เล่นรอบใหม่
+                <Download className="w-4 h-4" />
+                ดาวน์โหลดผลคะแนน CSV
               </button>
-            )}
-            <button
-              type="button"
-              onClick={onLeaveToHome}
-              className="px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl border border-slate-700 bg-slate-900/95 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-            >
-              <Home className="w-4 h-4" />
-              หน้าแรก
-            </button>
-          </div>
-        </header>
-
-        <footer className="pointer-events-auto max-w-3xl w-full mx-auto shrink-0">
-          <div
-            className="rounded-2xl border border-slate-700/80 p-3 sm:p-4 shadow-2xl"
-            style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
-          >
-            <div className="text-xs font-bold text-slate-300 mb-2">ตารางอันดับคะแนนทั้งหมด</div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-y-auto custom-scroll">
-              {sortedPlayers.map((p, idx) => {
-                const av = BLOOK_AVATARS.find((a) => a.id === p.avatar);
-                const rankLabel = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
-                return (
-                  <div
-                    key={p.id}
-                    className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border ${
-                      p.id === playerId
-                        ? 'border-cyan-400 bg-cyan-950/70'
-                        : 'border-slate-700/80 bg-slate-950/70'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-sm font-bold w-6 text-center shrink-0">{rankLabel}</span>
-                      <span className="text-lg shrink-0">{av?.emoji || '🦊'}</span>
-                      <span className="text-xs font-bold text-white truncate">{p.name}</span>
-                    </div>
-                    <span className="font-mono-tabular text-xs font-black text-amber-300 shrink-0">
-                      {p.score.toLocaleString()}
-                    </span>
-                  </div>
-                );
-              })}
+              {role === 'host' && (
+                <button
+                  type="button"
+                  onClick={onRestartLobby}
+                  className="px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  เล่นรอบใหม่
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onLeaveToHome}
+                className="px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl border border-slate-700 bg-slate-900/95 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <Home className="w-4 h-4" />
+                หน้าแรก
+              </button>
             </div>
-          </div>
-        </footer>
+          </header>
+
+          <footer className="pointer-events-auto max-w-3xl w-full mx-auto shrink-0">
+            <div
+              className="rounded-2xl border border-slate-700/80 p-3 sm:p-4 shadow-2xl"
+              style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
+            >
+              <div className="text-xs font-bold text-slate-300 mb-2">ตารางอันดับคะแนนทั้งหมด</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-y-auto custom-scroll">
+                {sortedPlayers.map((p, idx) => {
+                  const av = BLOOK_AVATARS.find((a) => a.id === p.avatar);
+                  const rankLabel = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+                  return (
+                    <div
+                      key={p.id}
+                      className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border ${
+                        p.id === playerId
+                          ? 'border-cyan-400 bg-cyan-950/70'
+                          : 'border-slate-700/80 bg-slate-950/70'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-bold w-6 text-center shrink-0">{rankLabel}</span>
+                        <span className="text-lg shrink-0">{av?.emoji || '🦊'}</span>
+                        <span className="text-xs font-bold text-white truncate">{p.name}</span>
+                      </div>
+                      <span className="font-mono-tabular text-xs font-black text-amber-300 shrink-0">
+                        {p.score.toLocaleString()}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </footer>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between gap-2 p-2 sm:p-5">
-      {/* Top Perimeter HUD Bar */}
-      <header className="pointer-events-auto max-w-5xl w-full mx-auto flex flex-wrap items-center justify-between gap-1.5 sm:gap-2.5">
-        {/* Left: Question Progress & Timer */}
-        <div
-          className="rounded-xl border border-slate-700/80 px-2.5 py-1.5 sm:px-4 sm:py-2 flex items-center gap-2.5 sm:gap-4 shadow-lg"
-          style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
-        >
-          <div className="text-[11px] sm:text-xs font-bold text-slate-300 tabular-nums">
-            ข้อ {(q?.index ?? 0) + 1}/{q?.total ?? snapshot.questionCount}
-          </div>
-          <span className="text-slate-600">|</span>
+    <>
+      {/* Top Perimeter HUD Bar anchored over Top 3D Screen */}
+      <header className="fixed inset-x-0 top-0 z-10 pointer-events-none p-2 sm:p-4">
+        <div className="max-w-5xl w-full mx-auto flex flex-wrap items-center justify-between gap-1.5 sm:gap-2.5">
+          {/* Left: Question Progress & Timer */}
           <div
-            className={`font-mono-tabular text-sm sm:text-lg font-black ${
-              secondsLeft <= 5 && snapshot.phase === 'question' ? 'text-rose-400' : 'text-cyan-400'
-            }`}
+            className="pointer-events-auto rounded-xl border border-slate-700/80 px-2.5 py-1.5 sm:px-4 sm:py-2 flex items-center gap-2.5 sm:gap-4 shadow-lg"
+            style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
           >
-            {snapshot.phase === 'question' ? `${secondsLeft}s` : 'เฉลย'}
-          </div>
-          <span className="text-slate-600">|</span>
-          <div className="text-[11px] sm:text-xs font-semibold text-slate-300 tabular-nums">
-            ตอบ {answeredCount}/{snapshot.players.length}
-          </div>
-        </div>
-
-        {/* Center/Right: Player Score or Host Controls & Camera Switcher */}
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-          {role === 'player' && me && (
+            <div className="text-[11px] sm:text-xs font-bold text-slate-300 tabular-nums">
+              ข้อ {(q?.index ?? 0) + 1}/{q?.total ?? snapshot.questionCount}
+            </div>
+            <span className="text-slate-600">|</span>
             <div
-              className="rounded-xl border border-slate-700/80 px-2.5 py-1.5 sm:px-3.5 sm:py-2 flex items-center gap-2 sm:gap-3 shadow-lg"
+              className={`font-mono-tabular text-sm sm:text-lg font-black ${
+                secondsLeft <= 5 && snapshot.phase === 'question' ? 'text-rose-400' : 'text-cyan-400'
+              }`}
+            >
+              {snapshot.phase === 'question' ? `${secondsLeft}s` : 'เฉลย'}
+            </div>
+            <span className="text-slate-600">|</span>
+            <div className="text-[11px] sm:text-xs font-semibold text-slate-300 tabular-nums">
+              ตอบ {answeredCount}/{snapshot.players.length}
+            </div>
+          </div>
+
+          {/* Center/Right: Player Score or Host Controls & Camera Switcher */}
+          <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 sm:gap-2">
+            {role === 'player' && me && (
+              <div
+                className="rounded-xl border border-slate-700/80 px-2.5 py-1.5 sm:px-3.5 sm:py-2 flex items-center gap-2 sm:gap-3 shadow-lg"
+                style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
+              >
+                <span className="font-mono-tabular text-xs sm:text-sm font-black text-amber-400">
+                  {me.score.toLocaleString()} คะแนน
+                </span>
+                {me.streak > 1 && (
+                  <span className="text-[11px] sm:text-xs font-bold text-orange-400 flex items-center gap-0.5 tabular-nums">
+                    <Flame className="w-3.5 h-3.5" />
+                    x{me.streak}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Camera Preset Selector */}
+            <div
+              className="hidden sm:flex items-center p-1 rounded-xl border border-slate-700/80 gap-1"
               style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
             >
-              <span className="font-mono-tabular text-xs sm:text-sm font-black text-amber-400">
-                {me.score.toLocaleString()} คะแนน
-              </span>
-              {me.streak > 1 && (
-                <span className="text-[11px] sm:text-xs font-bold text-orange-400 flex items-center gap-0.5 tabular-nums">
-                  <Flame className="w-3.5 h-3.5" />
-                  x{me.streak}
-                </span>
-              )}
+              {(
+                [
+                  { id: 'arena', label: 'มุมสูง' },
+                  { id: 'follow', label: 'ตามตัว' },
+                  { id: 'stage', label: 'เวที' },
+                ] as const
+              ).map((cam) => (
+                <button
+                  key={cam.id}
+                  type="button"
+                  onClick={() => onChangeCamera(cam.id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    cameraPreset === cam.id
+                      ? 'bg-cyan-400 text-slate-950'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {cam.label}
+                </button>
+              ))}
             </div>
-          )}
 
-          {/* Camera Preset Selector */}
-          <div
-            className="hidden sm:flex items-center p-1 rounded-xl border border-slate-700/80 gap-1"
-            style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
-          >
-            {(
-              [
-                { id: 'arena', label: 'มุมสูง' },
-                { id: 'follow', label: 'ตามตัว' },
-                { id: 'stage', label: 'เวที' },
-              ] as const
-            ).map((cam) => (
-              <button
-                key={cam.id}
-                type="button"
-                onClick={() => onChangeCamera(cam.id)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                  cameraPreset === cam.id
-                    ? 'bg-cyan-400 text-slate-950'
-                    : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                {cam.label}
-              </button>
-            ))}
+            {role === 'host' && (
+              <>
+                {snapshot.phase === 'question' ? (
+                  <button
+                    type="button"
+                    onClick={onRevealAnswer}
+                    className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-[11px] sm:text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    เฉลยทันที
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onNextQuestion}
+                    className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <FastForward className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    {(q?.index ?? 0) + 1 >= (q?.total ?? 0) ? 'สรุปอันดับแชมป์' : 'ข้อถัดไป'}
+                  </button>
+                )}
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={onToggleMute}
+              aria-label={muted ? 'เปิดเสียง' : 'ปิดเสียง'}
+              className="p-1.5 sm:p-2 rounded-xl border border-slate-700/80 text-slate-200 hover:text-white cursor-pointer"
+              style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
+            >
+              {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+
+            <button
+              type="button"
+              onClick={onLeaveToHome}
+              title="ออกจากห้อง"
+              className="px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl border border-rose-500/40 bg-rose-950/80 hover:bg-rose-900 text-rose-200 font-bold text-[11px] sm:text-xs cursor-pointer"
+            >
+              ออก
+            </button>
           </div>
-
-          {role === 'host' && (
-            <>
-              {snapshot.phase === 'question' ? (
-                <button
-                  type="button"
-                  onClick={onRevealAnswer}
-                  className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-[11px] sm:text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                >
-                  <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  เฉลยทันที
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onNextQuestion}
-                  className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                >
-                  <FastForward className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  {(q?.index ?? 0) + 1 >= (q?.total ?? 0) ? 'สรุปอันดับแชมป์' : 'ข้อถัดไป'}
-                </button>
-              )}
-            </>
-          )}
-
-          <button
-            type="button"
-            onClick={onToggleMute}
-            aria-label={muted ? 'เปิดเสียง' : 'ปิดเสียง'}
-            className="p-1.5 sm:p-2 rounded-xl border border-slate-700/80 text-slate-200 hover:text-white cursor-pointer"
-            style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
-          >
-            {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </button>
-
-          <button
-            type="button"
-            onClick={onLeaveToHome}
-            title="ออกจากห้อง"
-            className="px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl border border-rose-500/40 bg-rose-950/80 hover:bg-rose-900 text-rose-200 font-bold text-[11px] sm:text-xs cursor-pointer"
-          >
-            ออก
-          </button>
         </div>
       </header>
 
-      {/* Bottom Collapsible Question & Answer Dock */}
-      <footer className="pointer-events-auto max-w-4xl w-full mx-auto flex flex-col items-center">
-        <button
-          type="button"
-          onClick={() => setDockCollapsed((v) => !v)}
-          className="px-3 py-1 rounded-t-xl border border-b-0 border-slate-700/80 text-[11px] font-bold text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
-          style={{ backgroundColor: 'rgba(15, 23, 42, 0.92)' }}
-        >
-          {dockCollapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          {dockCollapsed ? 'แสดงแผงคำถาม (H)' : 'ซ่อนแผงคำถามเพื่อชม 3D (H)'}
-        </button>
-
-        {!dockCollapsed && q && (
-          <div
-            className="w-full rounded-2xl border border-slate-700/80 p-2.5 sm:p-4 shadow-2xl space-y-2 sm:space-y-3 max-h-[50dvh] sm:max-h-none overflow-y-auto touch-pan-y custom-scroll"
-            style={{ backgroundColor: 'rgba(15, 23, 42, 0.94)' }}
+      {/* Bottom 50% Split-Screen Question & 2x2 A/B/C/D Panel */}
+      {dockCollapsed ? (
+        <div className="shrink-0 z-10 bg-slate-900 border-t border-slate-700/90 px-3 py-1.5 flex justify-center pb-[max(0.35rem,env(safe-area-inset-bottom))]">
+          <button
+            type="button"
+            onClick={onToggleDockCollapsed}
+            className="px-4 py-1.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer"
           >
-            {/* Question Prompt + Result Feedback */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-display text-sm sm:text-xl font-bold text-white leading-snug whitespace-pre-line">
-                {q.prompt}
-              </h2>
-
-              {snapshot.phase === 'reveal' && role === 'player' && me && (
-                <div
-                  className={`px-2.5 py-1 rounded-lg text-[11px] sm:text-xs font-extrabold tabular-nums ${
-                    me.lastPointsEarned > 0
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                  }`}
-                >
-                  {me.lastPointsEarned > 0
-                    ? `ถูกต้อง! +${me.lastPointsEarned} คะแนน`
-                    : me.answeredCurrent
-                      ? 'ตอบผิดรอบนี้'
-                      : 'หมดเวลา!'}
-                </div>
-              )}
-
-              {snapshot.phase === 'question' && role === 'player' && me?.answeredCurrent && (
-                <div className="px-2.5 py-1 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-200 text-[11px] sm:text-xs font-bold">
-                  ล็อกคำตอบแล้ว! รอเพื่อนคนอื่น...
-                </div>
-              )}
+            <ChevronUp className="w-4 h-4 text-cyan-400" />
+            แสดงแผงคำถาม (H)
+          </button>
+        </div>
+      ) : (
+        <section className="h-[50dvh] shrink-0 z-10 bg-slate-900 border-t-2 border-slate-700/90 flex flex-col px-2.5 pt-1.5 pb-[max(0.65rem,env(safe-area-inset-bottom))] sm:px-5 sm:pt-2 sm:pb-4 overflow-y-auto touch-pan-y custom-scroll">
+          <div className="max-w-4xl w-full mx-auto flex-1 min-h-0 flex flex-col gap-2 sm:gap-3">
+            {/* Collapse Toggle Handle on Divider */}
+            <div className="flex items-center justify-between gap-2 shrink-0">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">
+                เลือกคำตอบ A / B / C / D (หรือกด 1–4 · แตะแท่นในจอ 3D ด้านบนได้)
+              </span>
+              <button
+                type="button"
+                onClick={onToggleDockCollapsed}
+                className="px-2.5 py-0.5 rounded-lg border border-slate-700 bg-slate-950/70 hover:bg-slate-800 text-[10px] sm:text-[11px] font-bold text-slate-300 flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+                ซ่อน (H)
+              </button>
             </div>
 
-            {/* 4 Answer Cards matching 3D Pad Colors */}
-            <div className="grid grid-cols-2 gap-1.5 sm:gap-2.5">
-              {ANSWER_PADS.map((pad) => {
-                const isCorrect = snapshot.correctIndex === pad.index;
-                const isSelected = me?.selectedOption === pad.index;
-                const count = snapshot.optionCounts[pad.index] || 0;
-                const dimmed = snapshot.phase === 'reveal' && !isCorrect;
-                const canClick =
-                  role === 'player' && snapshot.phase === 'question' && !me?.answeredCurrent;
+            {q && (
+              <>
+                {/* Question Card (คำถาม) */}
+                <div className="shrink-0 rounded-xl sm:rounded-2xl border border-slate-700/90 bg-slate-950/90 px-3 py-2.5 sm:px-5 sm:py-3.5 flex flex-col items-center justify-center text-center gap-1.5 min-h-[68px] sm:min-h-[88px] shadow-inner">
+                  <h2 className="font-display text-sm sm:text-xl font-bold text-white leading-snug whitespace-pre-line">
+                    {q.prompt}
+                  </h2>
 
-                return (
-                  <button
-                    key={pad.letter}
-                    type="button"
-                    disabled={!canClick}
-                    onClick={() => onSubmitAnswer(pad.index)}
-                    className={`relative flex items-center justify-between gap-2 sm:gap-3 px-2.5 py-2 sm:px-4 sm:py-3 rounded-xl border text-left transition-all duration-150 ${
-                      canClick ? 'cursor-pointer hover:brightness-110 active:scale-[0.99]' : 'cursor-default'
-                    } ${dimmed ? 'opacity-45' : 'opacity-100'} ${
-                      isSelected ? 'ring-2 ring-white' : ''
-                    } ${
-                      snapshot.phase === 'reveal' && isCorrect
-                        ? 'ring-2 ring-emerald-300 border-emerald-300'
-                        : 'border-slate-700'
-                    }`}
-                    style={{
-                      backgroundColor:
-                        snapshot.phase === 'reveal' && isCorrect
-                          ? 'rgba(16, 185, 129, 0.28)'
-                          : 'rgba(30, 41, 59, 0.9)',
-                    }}
-                  >
-                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                      <span
-                        className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg font-display font-black text-xs sm:text-sm text-white flex items-center justify-center shrink-0"
-                        style={{ backgroundColor: pad.hexColor }}
-                      >
-                        {pad.letter}
-                      </span>
-                      <span className="text-xs sm:text-sm font-bold text-white break-words leading-snug">
-                        {q.options[pad.index]}
-                      </span>
+                  {snapshot.phase === 'reveal' && role === 'player' && me && (
+                    <div
+                      className={`px-2.5 py-0.5 rounded-lg text-[11px] sm:text-xs font-extrabold tabular-nums ${
+                        me.lastPointsEarned > 0
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                      }`}
+                    >
+                      {me.lastPointsEarned > 0
+                        ? `ถูกต้อง! +${me.lastPointsEarned} คะแนน`
+                        : me.answeredCurrent
+                          ? 'ตอบผิดรอบนี้'
+                          : 'หมดเวลา!'}
                     </div>
+                  )}
 
-                    {(snapshot.phase === 'reveal' || role === 'host') && (
-                      <span className="font-mono-tabular text-[10px] sm:text-xs font-bold text-slate-300 shrink-0">
-                        {count}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                  {snapshot.phase === 'question' && role === 'player' && me?.answeredCurrent && (
+                    <div className="px-2.5 py-0.5 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-200 text-[11px] sm:text-xs font-bold">
+                      ล็อกคำตอบแล้ว! รอเพื่อนคนอื่น...
+                    </div>
+                  )}
+                </div>
 
-            {/* Compact Live Top-4 Leaderboard strip during reveal */}
-            {snapshot.phase === 'reveal' && sortedPlayers.length > 0 && (
-              <div className="pt-1 flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-slate-300 border-t border-slate-800">
-                <span className="font-bold text-amber-400">อันดับล่าสุด:</span>
-                {sortedPlayers.slice(0, 4).map((p, idx) => {
-                  const av = BLOOK_AVATARS.find((a) => a.id === p.avatar);
-                  return (
-                    <span key={p.id} className="font-semibold tabular-nums">
-                      #{idx + 1} {av?.emoji} {p.name} ({p.score.toLocaleString()})
-                    </span>
-                  );
-                })}
-              </div>
+                {/* 2x2 A/B/C/D Answer Pad Grid */}
+                <div className="flex-1 min-h-[112px] grid grid-cols-2 grid-rows-2 gap-2 sm:gap-3">
+                  {ANSWER_PADS.map((pad) => {
+                    const isCorrect = snapshot.correctIndex === pad.index;
+                    const isSelected = me?.selectedOption === pad.index;
+                    const count = snapshot.optionCounts[pad.index] || 0;
+                    const dimmed = snapshot.phase === 'reveal' && !isCorrect;
+                    const canClick =
+                      role === 'player' && snapshot.phase === 'question' && !me?.answeredCurrent;
+
+                    return (
+                      <button
+                        key={pad.letter}
+                        type="button"
+                        disabled={!canClick}
+                        onClick={() => onSubmitAnswer(pad.index)}
+                        className={`relative h-full flex items-center justify-between gap-2 sm:gap-3 px-2.5 py-2 sm:px-4 sm:py-3 rounded-xl border text-left transition-all duration-150 ${
+                          canClick ? 'cursor-pointer hover:brightness-110 active:scale-[0.99]' : 'cursor-default'
+                        } ${dimmed ? 'opacity-45' : 'opacity-100'} ${
+                          isSelected ? 'ring-2 ring-white' : ''
+                        } ${
+                          snapshot.phase === 'reveal' && isCorrect
+                            ? 'ring-2 ring-emerald-300 border-emerald-300'
+                            : 'border-slate-700'
+                        }`}
+                        style={{
+                          backgroundColor:
+                            snapshot.phase === 'reveal' && isCorrect
+                              ? 'rgba(16, 185, 129, 0.28)'
+                              : 'rgba(30, 41, 59, 0.92)',
+                        }}
+                      >
+                        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                          <span
+                            className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg font-display font-black text-xs sm:text-base text-white flex items-center justify-center shrink-0"
+                            style={{ backgroundColor: pad.hexColor }}
+                          >
+                            {pad.letter}
+                          </span>
+                          <span className="text-xs sm:text-base font-bold text-white break-words leading-snug">
+                            {q.options[pad.index]}
+                          </span>
+                        </div>
+
+                        {(snapshot.phase === 'reveal' || role === 'host') && (
+                          <span className="font-mono-tabular text-[11px] sm:text-xs font-bold text-slate-300 shrink-0">
+                            {count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Compact Live Top-4 Leaderboard strip during reveal */}
+                {snapshot.phase === 'reveal' && sortedPlayers.length > 0 && (
+                  <div className="shrink-0 pt-1 flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-slate-300 border-t border-slate-800">
+                    <span className="font-bold text-amber-400">อันดับล่าสุด:</span>
+                    {sortedPlayers.slice(0, 4).map((p, idx) => {
+                      const av = BLOOK_AVATARS.find((a) => a.id === p.avatar);
+                      return (
+                        <span key={p.id} className="font-semibold tabular-nums">
+                          #{idx + 1} {av?.emoji} {p.name} ({p.score.toLocaleString()})
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </div>
-        )}
-      </footer>
-    </div>
+        </section>
+      )}
+    </>
   );
 }

@@ -153,13 +153,18 @@ function createDefenderLabelSprite(
 }
 
 export class ZombieArenaScene {
-  private container: HTMLElement;
+  private container: HTMLElement | null;
   private onHudChange: (state: ZombieHudState) => void;
   private isSoftwareGl: boolean;
   private multiplayerMode: boolean;
   private localDefenderId: string;
+  private splitScreen: boolean;
+  private silentAudio: boolean;
+  private externalManaged: boolean;
+  private maxAnisotropy: number;
 
-  private renderer: THREE.WebGLRenderer;
+  private renderer: THREE.WebGLRenderer | null = null;
+  private resizeObserver: ResizeObserver | null = null;
   private scene: THREE.Scene;
   private fog!: THREE.FogExp2;
   private camera: THREE.PerspectiveCamera;
@@ -222,57 +227,78 @@ export class ZombieArenaScene {
   private coilMat: THREE.MeshStandardMaterial;
 
   constructor(
-    container: HTMLElement,
+    container: HTMLElement | null,
     avatarId: BlookAvatarId,
     onHudChange: (state: ZombieHudState) => void,
     options?: {
       multiplayer?: boolean;
       localDefenderId?: string;
       initialSnapshot?: ZombieGameSnapshot | null;
+      splitScreen?: boolean;
+      externalManaged?: {
+        isSoftwareGl: boolean;
+        envMap: THREE.Texture | null;
+        maxAnisotropy?: number;
+        silentAudio?: boolean;
+      };
     },
   ) {
     this.container = container;
     this.onHudChange = onHudChange;
-    this.isSoftwareGl = ZombieArenaScene.detectSoftwareGl();
+    this.externalManaged = Boolean(options?.externalManaged);
+    this.isSoftwareGl = options?.externalManaged
+      ? options.externalManaged.isSoftwareGl
+      : ZombieArenaScene.detectSoftwareGl();
     this.multiplayerMode = Boolean(options?.multiplayer);
     this.localDefenderId = options?.localDefenderId || 'local';
+    this.splitScreen = Boolean(options?.splitScreen);
+    this.silentAudio = Boolean(options?.externalManaged?.silentAudio);
 
-    this.renderer = new THREE.WebGLRenderer({
-      antialias: !this.isSoftwareGl,
-      powerPreference: 'high-performance',
-    });
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
-    this.renderer.setPixelRatio(
-      this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 2),
-    );
-    this.renderer.shadowMap.enabled = !this.isSoftwareGl;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setSize(
-      container.clientWidth || window.innerWidth,
-      container.clientHeight || window.innerHeight,
-    );
-    this.renderer.domElement.style.display = 'block';
-    this.renderer.domElement.style.width = '100%';
-    this.renderer.domElement.style.height = '100%';
-    container.appendChild(this.renderer.domElement);
+    if (!options?.externalManaged && container) {
+      this.renderer = new THREE.WebGLRenderer({
+        antialias: !this.isSoftwareGl,
+        powerPreference: 'high-performance',
+      });
+      this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure = 1.15;
+      this.renderer.setPixelRatio(
+        this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 2),
+      );
+      this.renderer.shadowMap.enabled = !this.isSoftwareGl;
+      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.renderer.setSize(
+        container.clientWidth || window.innerWidth,
+        container.clientHeight || window.innerHeight,
+      );
+      this.renderer.domElement.style.display = 'block';
+      this.renderer.domElement.style.width = '100%';
+      this.renderer.domElement.style.height = '100%';
+      container.appendChild(this.renderer.domElement);
+      this.maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    } else {
+      this.maxAnisotropy = options?.externalManaged?.maxAnisotropy ?? 4;
+    }
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x090f1d);
     this.fog = new THREE.FogExp2(0x090f1d, 0.022);
     this.scene.fog = this.fog;
 
-    const w = container.clientWidth || window.innerWidth;
-    const h = container.clientHeight || window.innerHeight;
+    const w = container?.clientWidth || window.innerWidth;
+    const h = container?.clientHeight || window.innerHeight;
     this.camera = new THREE.PerspectiveCamera(46, w / Math.max(1, h), 0.1, 160);
     this.updateCameraForAspect(w, h);
 
-    const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
-    const envTex = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    this.scene.environment = envTex;
-    this.disposables.push(envTex);
-    pmremGenerator.dispose();
+    if (options?.externalManaged) {
+      this.scene.environment = options.externalManaged.envMap;
+    } else if (this.renderer) {
+      const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+      const envTex = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+      this.scene.environment = envTex;
+      this.disposables.push(envTex);
+      pmremGenerator.dispose();
+    }
 
     this.bulletGeo = new THREE.SphereGeometry(0.24, 12, 12);
     this.normalBulletMat = new THREE.MeshStandardMaterial({
@@ -332,7 +358,7 @@ export class ZombieArenaScene {
     if (this.multiplayerMode) {
       if (options?.initialSnapshot) {
         this.syncMultiplayerState(options.initialSnapshot);
-      } else {
+      } else if (!this.externalManaged) {
         this.upsertDefender({
           id: this.localDefenderId,
           name: 'You',
@@ -364,16 +390,21 @@ export class ZombieArenaScene {
       this.emitHud();
     }
 
-    if (!this.isSoftwareGl) {
-      this.renderer.compile(this.scene, this.camera);
+    if (this.renderer && container) {
+      if (!this.isSoftwareGl) {
+        this.renderer.compile(this.scene, this.camera);
+      }
+      this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown);
+      window.addEventListener('resize', this.handleResize);
+      if (typeof ResizeObserver !== 'undefined') {
+        this.resizeObserver = new ResizeObserver(() => this.handleResize());
+        this.resizeObserver.observe(container);
+      }
+      this.startLoop();
     }
-
-    this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown);
-    window.addEventListener('resize', this.handleResize);
-    this.startLoop();
   }
 
-  private static detectSoftwareGl(): boolean {
+  public static detectSoftwareGl(): boolean {
     const canvas = document.createElement('canvas');
     const gl = canvas.getContext('webgl2');
     if (!gl) return true;
@@ -384,8 +415,36 @@ export class ZombieArenaScene {
     return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
   }
 
+  private playCue(fn: () => void) {
+    if (!this.silentAudio) {
+      fn();
+    }
+  }
+
+  public getScene(): THREE.Scene {
+    return this.scene;
+  }
+
+  public getCamera(): THREE.PerspectiveCamera {
+    return this.camera;
+  }
+
+  public setSilentAudio(silent: boolean) {
+    this.silentAudio = silent;
+  }
+
+  public setViewportSize(w: number, h: number) {
+    if (this.disposed) return;
+    this.updateCameraForAspect(w, h);
+  }
+
+  public stepManaged(rawDt: number, elapsed: number) {
+    if (this.disposed) return;
+    this.update(rawDt, elapsed);
+  }
+
   private handlePointerDown = (e: PointerEvent) => {
-    if (this.disposed || this.hud.paused || this.hud.gameOver) return;
+    if (this.disposed || this.hud.paused || this.hud.gameOver || !this.renderer) return;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -396,7 +455,7 @@ export class ZombieArenaScene {
       const hits = this.raycaster.intersectObject(z.rig.root, true);
       if (hits.length > 0) {
         this.setTargetZombie(z.id);
-        soundEngine.playClick();
+        this.playCue(() => soundEngine.playClick());
         return;
       }
     }
@@ -405,7 +464,7 @@ export class ZombieArenaScene {
   private setupLighting() {
     const keyLight = new THREE.DirectionalLight(0xffedd5, 2.0);
     keyLight.position.set(10, 22, 14);
-    keyLight.castShadow = !this.isSoftwareGl;
+    keyLight.castShadow = !this.isSoftwareGl && !this.externalManaged;
     keyLight.shadow.mapSize.set(1024, 1024);
     keyLight.shadow.camera.near = 2;
     keyLight.shadow.camera.far = 65;
@@ -426,7 +485,7 @@ export class ZombieArenaScene {
   }
 
   private buildDefenseLane() {
-    const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
+    const maxAniso = this.maxAnisotropy;
     const floorTex = createArenaFloorTexture(maxAniso);
     const roughTex = createFloorRoughnessTexture(maxAniso);
     floorTex.repeat.set(12, 4);
@@ -774,7 +833,7 @@ export class ZombieArenaScene {
 
     this.targetedZombieId = bossId;
     this.shakeIntensity = 0.35;
-    soundEngine.playBossWarning();
+    this.playCue(() => soundEngine.playBossWarning());
     this.hud.feedbackText = '👹 BOSS ZOMBIE ปรากฏตัว! ตอบคำถาม 5 ข้อให้ทันก่อนบอสพุ่งชนฐาน!';
     this.hud.feedbackKind = 'damage';
     this.emitHud();
@@ -917,7 +976,7 @@ export class ZombieArenaScene {
         if (isBoss) {
           this.targetedZombieId = sz.id;
           this.shakeIntensity = 0.35;
-          soundEngine.playBossWarning();
+          this.playCue(() => soundEngine.playBossWarning());
           this.hud.feedbackText =
             '👹 BOSS ZOMBIE ปรากฏตัว! ช่วยกันตอบคำถาม 5 ข้อให้ทันก่อนบอสพุ่งชนฐาน!';
           this.hud.feedbackKind = 'damage';
@@ -969,7 +1028,7 @@ export class ZombieArenaScene {
       bossDefeated: shot.bossDefeated,
     });
 
-    soundEngine.playLaser();
+    this.playCue(() => soundEngine.playLaser());
 
     if (shot.bossDefeated) {
       this.hud.feedbackText = `🏆 ${shot.shooterName} ปราบ BOSS ZOMBIE สำเร็จ! (+${shot.pointsEarned} คะแนน & ระเบิด +1)`;
@@ -998,7 +1057,7 @@ export class ZombieArenaScene {
 
   public handleRemoteWrong(wrong: ZombieWrongEvent) {
     if (!this.multiplayerMode || this.disposed) return;
-    soundEngine.playWrong();
+    this.playCue(() => soundEngine.playWrong());
     this.shakeIntensity = 0.22;
     this.hud.feedbackText =
       wrong.shooterId === this.localDefenderId
@@ -1017,8 +1076,8 @@ export class ZombieArenaScene {
       this.hud.feedbackText =
         '⚠️ บอสพุ่งชนฐาน! HP เหลือวิกฤต — ฝูงซอมบี้ที่เหลือกำลังวิ่งกรูเข้ามา!';
       this.shakeIntensity = 0.95;
-      soundEngine.playExplosion();
-      soundEngine.playDamage();
+      this.playCue(() => soundEngine.playExplosion());
+      this.playCue(() => soundEngine.playDamage());
       this.shockwaveMesh.position.set(breach.x, 0.1, breach.z);
       this.shockwaveMesh.scale.setScalar(1);
       this.shockwaveLife = 0.55;
@@ -1026,7 +1085,7 @@ export class ZombieArenaScene {
     } else {
       this.hud.feedbackText = `ซอมบี้บุกถึงฐาน! -${breach.damage} HP`;
       this.shakeIntensity = 0.55;
-      soundEngine.playDamage();
+      this.playCue(() => soundEngine.playDamage());
       this.spawnBurst(breach.x, 1.0, breach.z, 18);
     }
     this.hud.feedbackKind = 'damage';
@@ -1311,22 +1370,28 @@ export class ZombieArenaScene {
     const aspect = safeW / safeH;
     this.camera.aspect = aspect;
 
-    // Landscape keeps exact classic framing; portrait widens vFOV & pulls camera back
-    // while lowering target.y so defenders (x=-10.3) and zombies sit clearly between top & bottom HUDs.
-    const portraitT = THREE.MathUtils.clamp((1.15 - aspect) / (1.15 - 0.45), 0, 1);
-    const targetFov = THREE.MathUtils.lerp(46, 62, portraitT);
+    // Split-screen & monitor frames occupy their own dedicated box (not covered by bottom overlay),
+    // so keep the arena vertically centered instead of shifting upward.
+    const centeredFrame = this.splitScreen || this.externalManaged;
+    const portraitT = centeredFrame
+      ? THREE.MathUtils.clamp((1.2 - aspect) / 0.8, 0, 1) * 0.5
+      : THREE.MathUtils.clamp((1.15 - aspect) / (1.15 - 0.45), 0, 1);
+
+    const targetFov = THREE.MathUtils.lerp(46, centeredFrame ? 52 : 62, portraitT);
     this.camera.fov = targetFov;
     this.camera.updateProjectionMatrix();
 
     const halfVRad = THREE.MathUtils.degToRad(targetFov * 0.5);
-    const desiredHalfWidth = THREE.MathUtils.lerp(13.2, 11.4, portraitT);
+    const desiredHalfWidth = centeredFrame
+      ? THREE.MathUtils.lerp(13.0, 11.8, portraitT)
+      : THREE.MathUtils.lerp(13.2, 11.4, portraitT);
     const requiredDist = desiredHalfWidth / (Math.max(0.38, aspect) * Math.tan(halfVRad));
     const extraZ = Math.max(0, requiredDist - 18.4);
 
-    const camX = THREE.MathUtils.lerp(1.2, 0.3, portraitT);
+    const camX = THREE.MathUtils.lerp(1.2, 0.4, portraitT);
     const camY = 8.8 + extraZ * 0.32;
     const camZ = 16.2 + extraZ * 0.94;
-    const targetY = THREE.MathUtils.lerp(1.35, -1.65, portraitT);
+    const targetY = centeredFrame ? 0.9 : THREE.MathUtils.lerp(1.35, -1.65, portraitT);
 
     this.baseCameraPos.set(camX, camY, camZ);
     this.cameraTarget.set(camX, targetY, 0);
@@ -1341,7 +1406,7 @@ export class ZombieArenaScene {
   }
 
   private handleResize = () => {
-    if (this.disposed) return;
+    if (this.disposed || !this.renderer || !this.container) return;
     const w = this.container.clientWidth || window.innerWidth;
     const h = this.container.clientHeight || window.innerHeight;
     this.updateCameraForAspect(w, h);
@@ -1349,8 +1414,10 @@ export class ZombieArenaScene {
   };
 
   private startLoop() {
+    if (!this.renderer) return;
+    const renderer = this.renderer;
     const afterDraw = (cb: () => void) => {
-      const gl = this.renderer.getContext() as WebGL2RenderingContext;
+      const gl = renderer.getContext() as WebGL2RenderingContext;
       const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
       gl.flush();
       const poll = () => {
@@ -1375,7 +1442,7 @@ export class ZombieArenaScene {
       const elapsed = this.clock.getElapsedTime();
 
       this.update(rawDt, elapsed);
-      this.renderer.render(this.scene, this.camera);
+      renderer.render(this.scene, this.camera);
 
       if (this.isSoftwareGl) {
         afterDraw(tick);
@@ -1562,7 +1629,7 @@ export class ZombieArenaScene {
 
       if (dist <= step + 0.45) {
         if (b.bossHitOnly) {
-          soundEngine.playBossHit();
+          this.playCue(() => soundEngine.playBossHit());
           this.shakeIntensity = 0.28;
           this.hitstopTimer = 0.03;
           this.spawnBurst(tx, ty, tz, 18);
@@ -1578,7 +1645,7 @@ export class ZombieArenaScene {
             minions.forEach((v) => this.eliminateZombie(v, true));
           }
         } else if (b.explosive) {
-          soundEngine.playExplosion();
+          this.playCue(() => soundEngine.playExplosion());
           this.shakeIntensity = 0.65;
           this.hitstopTimer = 0.05;
           this.shockwaveMesh.position.set(tx, 0.1, tz);
@@ -1604,19 +1671,19 @@ export class ZombieArenaScene {
           }
         } else if (target) {
           if (b.bossDefeated) {
-            soundEngine.playExplosion();
+            this.playCue(() => soundEngine.playExplosion());
             this.shakeIntensity = 0.65;
             this.shockwaveMesh.position.set(tx, 0.1, tz);
             this.shockwaveMesh.scale.setScalar(1);
             this.shockwaveLife = 0.5;
           } else {
-            soundEngine.playCorrect();
+            this.playCue(() => soundEngine.playCorrect());
             this.shakeIntensity = 0.2;
           }
           this.hitstopTimer = 0.03;
           this.eliminateZombie(target, false);
         } else if (this.multiplayerMode) {
-          soundEngine.playCorrect();
+          this.playCue(() => soundEngine.playCorrect());
           this.spawnBurst(tx, 1.1, tz, 20);
         }
 
@@ -1688,8 +1755,12 @@ export class ZombieArenaScene {
     this.disposed = true;
     cancelAnimationFrame(this.frameId);
     clearTimeout(this.frameId);
-    this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown);
-    window.removeEventListener('resize', this.handleResize);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    if (this.renderer) {
+      this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown);
+      window.removeEventListener('resize', this.handleResize);
+    }
 
     for (const z of this.zombies) {
       z.rig.dispose();
@@ -1701,9 +1772,12 @@ export class ZombieArenaScene {
     }
 
     this.disposables.forEach((d) => d.dispose());
-    this.renderer.dispose();
-    if (this.renderer.domElement.parentNode === this.container) {
-      this.container.removeChild(this.renderer.domElement);
+    if (this.renderer) {
+      this.renderer.dispose();
+      if (this.container && this.renderer.domElement.parentNode === this.container) {
+        this.container.removeChild(this.renderer.domElement);
+      }
+      this.renderer = null;
     }
   }
 }

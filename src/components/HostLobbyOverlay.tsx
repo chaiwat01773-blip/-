@@ -4,17 +4,21 @@ import {
   Check,
   Copy,
   Crosshair,
+  Download,
   FileSpreadsheet,
   Play,
   Plus,
   Trash2,
+  Upload,
   UserX,
+  Users,
   Volume2,
   VolumeX,
   X,
 } from 'lucide-react';
 import {
   BLOOK_AVATARS,
+  TEAM_DEFS,
   type BlookAvatarId,
   type GameMode,
   type GameStateSnapshot,
@@ -22,8 +26,18 @@ import {
   type QuizQuestion,
   type ZombieTier,
 } from '../shared/types.ts';
-import { BUILTIN_QUESTION_PACKS, parseQuestionsFromCsv } from '../shared/questionPacks.ts';
-import { DEFAULT_ZOMBIE_PUZZLES, parseZombiePuzzlesFromCsv } from '../shared/logicPuzzles.ts';
+import {
+  BUILTIN_QUESTION_PACKS,
+  parseQuestionsFromCsv,
+  QUIZ_SPREADSHEET_TEMPLATE_CSV,
+  QUIZ_SPREADSHEET_TEMPLATE_TSV,
+} from '../shared/questionPacks.ts';
+import {
+  DEFAULT_ZOMBIE_PUZZLES,
+  parseZombiePuzzlesFromCsv,
+  ZOMBIE_SPREADSHEET_TEMPLATE_CSV,
+  ZOMBIE_SPREADSHEET_TEMPLATE_TSV,
+} from '../shared/logicPuzzles.ts';
 
 interface HostLobbyOverlayProps {
   snapshot: GameStateSnapshot;
@@ -45,6 +59,18 @@ function getSharedAppUrl(): string | null {
     return `${protocol}//${hostname.replace(/^ais-dev-/, 'ais-pre-')}`;
   }
   return null;
+}
+
+function downloadUtf8Csv(filename: string, csvContent: string): void {
+  const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function HostLobbyOverlay({
@@ -83,6 +109,13 @@ export function HostLobbyOverlay({
   const [zAutoFill, setZAutoFill] = useState(snapshot.zombieAutoFill);
   const [zCsvText, setZCsvText] = useState('');
   const [zCsvFeedback, setZCsvFeedback] = useState<string | null>(null);
+
+  // Spreadsheet template / file upload modal state
+  const [spreadsheetModalMode, setSpreadsheetModalMode] = useState<'quiz' | 'zombie' | null>(null);
+  const [templateCopied, setTemplateCopied] = useState(false);
+  const [spreadsheetFeedback, setSpreadsheetFeedback] = useState<string | null>(null);
+  const quizCsvInputRef = useRef<HTMLInputElement | null>(null);
+  const zombieCsvInputRef = useRef<HTMLInputElement | null>(null);
 
   const sharedAppUrl = getSharedAppUrl();
   const cleanBase = shareOrigin.trim().replace(/\/$/, '') || window.location.origin;
@@ -144,11 +177,36 @@ export function HostLobbyOverlay({
   const handleImportCsv = () => {
     const parsed = parseQuestionsFromCsv(csvText);
     if (parsed.length === 0) {
-      setCsvFeedback('ไม่พบแถวคำถามที่ถูกต้อง (รูปแบบ: คำถาม,ตัวเลือกA,B,C,D,คำตอบA-D,วินาที)');
+      setCsvFeedback(
+        'ไม่พบแถวคำถามที่ถูกต้อง (รองรับทั้งรูปแบบเทมเพลต 8 คอลัมน์ และ คำถาม,A,B,C,D,คำตอบ,วินาที)',
+      );
       return;
     }
     setEditQuestions(parsed);
     setCsvFeedback(`นำเข้าคำถามสำเร็จ ${parsed.length} ข้อ!`);
+  };
+
+  const handleUploadQuizCsvFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const content = await file.text();
+      setCsvText(content);
+      const parsed = parseQuestionsFromCsv(content);
+      if (parsed.length === 0) {
+        const msg = `ไม่พบคำถามที่ถูกต้องในไฟล์ "${file.name}" กรุณาใช้เทมเพลตของเราแล้วส่งออกเป็น .csv`;
+        setSpreadsheetFeedback(msg);
+        setCsvFeedback(msg);
+        return;
+      }
+      setEditQuestions(parsed);
+      setCsvFeedback(`นำเข้าคำถามจากไฟล์ "${file.name}" สำเร็จ ${parsed.length} ข้อ!`);
+      setSpreadsheetFeedback(null);
+      setSpreadsheetModalMode(null);
+    } catch {
+      const msg = 'ไม่สามารถอ่านไฟล์ CSV นี้ได้ กรุณาลองใหม่อีกครั้ง';
+      setSpreadsheetFeedback(msg);
+      setCsvFeedback(msg);
+    }
   };
 
   const handleSaveEditor = () => {
@@ -173,6 +231,51 @@ export function HostLobbyOverlay({
     }
     setZEditPuzzles(parsed);
     setZCsvFeedback(`นำเข้าโจทย์ซอมบี้สำเร็จ ${parsed.length} ข้อ!`);
+  };
+
+  const handleUploadZombieCsvFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const content = await file.text();
+      setZCsvText(content);
+      const parsed = parseZombiePuzzlesFromCsv(content);
+      if (parsed.length === 0) {
+        const msg = `ไม่พบโจทย์ที่ถูกต้องในไฟล์ "${file.name}" กรุณาใช้เทมเพลตของเราแล้วส่งออกเป็น .csv`;
+        setSpreadsheetFeedback(msg);
+        setZCsvFeedback(msg);
+        return;
+      }
+      setZEditPuzzles(parsed);
+      setZCsvFeedback(`นำเข้าโจทย์ซอมบี้จากไฟล์ "${file.name}" สำเร็จ ${parsed.length} ข้อ!`);
+      setSpreadsheetFeedback(null);
+      setSpreadsheetModalMode(null);
+    } catch {
+      const msg = 'ไม่สามารถอ่านไฟล์ CSV นี้ได้ กรุณาลองใหม่อีกครั้ง';
+      setSpreadsheetFeedback(msg);
+      setZCsvFeedback(msg);
+    }
+  };
+
+  const handleCopyTemplate = async (mode: 'quiz' | 'zombie') => {
+    const tsv = mode === 'quiz' ? QUIZ_SPREADSHEET_TEMPLATE_TSV : ZOMBIE_SPREADSHEET_TEMPLATE_TSV;
+    try {
+      await navigator.clipboard.writeText(tsv);
+      setTemplateCopied(true);
+      setSpreadsheetFeedback('คัดลอกเทมเพลตแล้ว! สามารถนำไปวาง (Ctrl+V) ใน Google Sheets หรือ Excel ได้ทันที');
+      setTimeout(() => setTemplateCopied(false), 2500);
+    } catch {
+      setSpreadsheetFeedback('คัดลอกอัตโนมัติไม่สำเร็จ แนะนำให้กด "ดาวน์โหลด" เป็นไฟล์ .csv แทนครับ');
+    }
+  };
+
+  const handleDownloadTemplate = (mode: 'quiz' | 'zombie') => {
+    if (mode === 'quiz') {
+      downloadUtf8Csv('template-quiz-questions.csv', QUIZ_SPREADSHEET_TEMPLATE_CSV);
+      setSpreadsheetFeedback('ดาวน์โหลด template-quiz-questions.csv แล้ว เปิดแก้ไขใน Excel / Google Sheets ได้เลย');
+    } else {
+      downloadUtf8Csv('template-zombie-puzzles.csv', ZOMBIE_SPREADSHEET_TEMPLATE_CSV);
+      setSpreadsheetFeedback('ดาวน์โหลด template-zombie-puzzles.csv แล้ว เปิดแก้ไขใน Excel / Google Sheets ได้เลย');
+    }
   };
 
   const handleSaveZombieEditor = () => {
@@ -214,7 +317,7 @@ export function HostLobbyOverlay({
                 {copied ? 'คัดลอกลิงก์ชวนเพื่อนแล้ว' : 'คัดลอกลิงก์ชวนเพื่อน'}
               </button>
 
-              {snapshot.mode === 'zombie' ? (
+              {snapshot.mode === 'zombie' || snapshot.mode === 'zombie_teams' ? (
                 <button
                   type="button"
                   onClick={handleOpenZombieEditor}
@@ -239,7 +342,7 @@ export function HostLobbyOverlay({
           {/* Mode Toggle Row */}
           <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-semibold text-slate-400">โหมดเกมในห้องนี้:</span>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => onChangeMode('quiz')}
@@ -261,7 +364,19 @@ export function HostLobbyOverlay({
                 }`}
               >
                 <Crosshair className="w-3.5 h-3.5" />
-                ซอมบี้ตรรกศาสตร์ (Co-op)
+                ซอมบี้ (Co-op)
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeMode('zombie_teams')}
+                className={`px-3 py-1 rounded-lg text-xs font-extrabold border flex items-center gap-1 transition-colors cursor-pointer ${
+                  snapshot.mode === 'zombie_teams'
+                    ? 'border-cyan-400 bg-cyan-400/20 text-cyan-300'
+                    : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-white'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                ซอมบี้ 4 ทีม (A-D)
               </button>
             </div>
           </div>
@@ -355,7 +470,7 @@ export function HostLobbyOverlay({
               <span>ผู้เล่นในห้อง ({snapshot.players.length} คน)</span>
               <span className="text-slate-500">·</span>
               <span className="text-xs font-medium text-slate-300">
-                {snapshot.mode === 'zombie'
+                {snapshot.mode === 'zombie' || snapshot.mode === 'zombie_teams'
                   ? `ชุดโจทย์ซอมบี้: ${snapshot.zombiePackTitle} (${snapshot.zombiePuzzleCount} ข้อ)`
                   : `ชุดคำถาม: ${snapshot.packTitle}`}
               </span>
@@ -367,7 +482,11 @@ export function HostLobbyOverlay({
                 className="px-5 py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-extrabold text-sm flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
               >
                 <Play className="w-4 h-4 fill-current" />
-                {snapshot.mode === 'zombie' ? 'เริ่มเกมซอมบี้ Co-op!' : 'เริ่มเกมเลย!'}
+                {snapshot.mode === 'zombie_teams'
+                  ? 'เริ่มเกมซอมบี้แบ่งทีม!'
+                  : snapshot.mode === 'zombie'
+                    ? 'เริ่มเกมซอมบี้ Co-op!'
+                    : 'เริ่มเกมเลย!'}
               </button>
               <button
                 type="button"
@@ -379,7 +498,7 @@ export function HostLobbyOverlay({
             </div>
           </div>
 
-          {/* Host Defender Avatar Picker when in Zombie Mode */}
+          {/* Host Defender Avatar Picker when in Zombie Co-op Mode */}
           {snapshot.mode === 'zombie' && (
             <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl border border-emerald-500/30 bg-emerald-950/35">
               <span className="text-xs font-bold text-emerald-200">
@@ -405,24 +524,84 @@ export function HostLobbyOverlay({
             </div>
           )}
 
+          {/* Host Monitor Overview & 4-Team Summary when in Zombie Teams Mode */}
+          {snapshot.mode === 'zombie_teams' && (
+            <div className="space-y-2">
+              <div className="px-3 py-2 rounded-xl border border-cyan-500/35 bg-cyan-950/35 text-xs text-cyan-100 flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-cyan-300">
+                  บทบาทของคุณ: ผู้คุม (จอ Monitor ตรวจดูทีม)
+                </span>
+                <span className="text-slate-300">
+                  เมื่อเริ่มเกม หน้าจอจะเปิดเท่าจำนวนทีมที่มีคนเล่น (2 ทีม = 2 จอ · 3–4 ทีม = 4 จอ) และกดขยายดูรายทีมได้
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {TEAM_DEFS.map((t) => {
+                  const members = snapshot.players.filter((p) => (p.team || 'A') === t.id);
+                  return (
+                    <div
+                      key={t.id}
+                      className={`rounded-xl border px-2.5 py-2 ${t.borderClass} ${t.bgClass}`}
+                    >
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span className={`text-xs font-black ${t.textClass}`}>{t.label}</span>
+                        <span className="text-[11px] font-bold text-white/90 font-mono-tabular">
+                          {members.length} คน
+                        </span>
+                      </div>
+                      {members.length === 0 ? (
+                        <div className="text-[10px] text-slate-400">ยังไม่มีสมาชิก</div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1 max-h-14 overflow-y-auto custom-scroll">
+                          {members.map((m) => {
+                            const av = BLOOK_AVATARS.find((a) => a.id === m.avatar);
+                            return (
+                              <span
+                                key={m.id}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-950/75 text-[10px] font-bold text-slate-100"
+                              >
+                                <span>{av?.emoji || '🦊'}</span>
+                                <span className="max-w-[70px] truncate">{m.name}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {snapshot.players.length === 0 ? (
             <div className="py-4 text-center text-sm text-slate-400 border border-dashed border-slate-700 rounded-xl">
-              {snapshot.mode === 'zombie'
-                ? 'รอเพื่อนเข้าร่วมห้อง (หรือกดเริ่มเกมซอมบี้ได้เลย เพื่อนสามารถสแกน QR เข้ามาร่วมยิงระหว่างเกมได้ด้วย!)'
-                : 'กำลังรอผู้เล่นเข้าร่วมห้อง... (สามารถเปิดแท็บใหม่หรือสแกน QR Code เพื่อทดสอบเข้าห้องได้ทันที)'}
+              {snapshot.mode === 'zombie_teams'
+                ? 'รอเพื่อนเข้าห้องและเลือกทีม A / B / C / D (สามารถสแกน QR เข้ามาร่วมทีมระหว่างเกมได้)'
+                : snapshot.mode === 'zombie'
+                  ? 'รอเพื่อนเข้าร่วมห้อง (หรือกดเริ่มเกมซอมบี้ได้เลย เพื่อนสามารถสแกน QR เข้ามาร่วมยิงระหว่างเกมได้ด้วย!)'
+                  : 'กำลังรอผู้เล่นเข้าร่วมห้อง... (สามารถเปิดแท็บใหม่หรือสแกน QR Code เพื่อทดสอบเข้าห้องได้ทันที)'}
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 max-h-32 overflow-y-auto custom-scroll pr-1">
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 max-h-28 overflow-y-auto custom-scroll pr-1">
               {snapshot.players.map((p) => {
                 const av = BLOOK_AVATARS.find((a) => a.id === p.avatar);
+                const teamDef = TEAM_DEFS.find((t) => t.id === p.team);
                 return (
                   <div
                     key={p.id}
                     className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-700 bg-slate-950/70"
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <span className="text-lg shrink-0">{av?.emoji || '🦊'}</span>
                       <span className="text-xs font-bold text-white truncate">{p.name}</span>
+                      {snapshot.mode === 'zombie_teams' && teamDef && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-black shrink-0 ${teamDef.badgeClass}`}
+                        >
+                          {teamDef.shortLabel}
+                        </span>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -503,24 +682,46 @@ export function HostLobbyOverlay({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-bold text-emerald-400">
-                    นำเข้าคำถามจาก CSV (คำถาม,A,B,C,D,คำตอบ A-D,วินาที)
+                    นำเข้าคำถามจาก CSV / สเปรดชีต
                   </span>
-                  <button
-                    type="button"
-                    onClick={handleImportCsv}
-                    className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs cursor-pointer"
-                  >
-                    แปลงข้อมูล CSV
-                  </button>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTemplate('quiz')}
+                      className="px-2.5 py-1 rounded-lg border border-cyan-500/50 bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      ดาวน์โหลดเทมเพลต (.csv)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSpreadsheetFeedback(null);
+                        setTemplateCopied(false);
+                        setSpreadsheetModalMode('quiz');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-extrabold text-xs flex items-center gap-1 cursor-pointer"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      นำเข้าจากสเปรดชีต / อัปโหลด CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleImportCsv}
+                      className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs cursor-pointer"
+                    >
+                      แปลงข้อมูล CSV
+                    </button>
+                  </div>
                 </div>
                 <textarea
                   rows={3}
                   value={csvText}
                   onChange={(e) => setCsvText(e.target.value)}
-                  placeholder={'ตัวอย่าง:\nเมืองหลวงของไทยคือข้อใด?,เชียงใหม่,กรุงเทพมหานคร,ภูเก็ต,ขอนแก่น,B,15'}
+                  placeholder={'วางข้อมูล CSV/จากสเปรดชีตตรงนี้ หรือกด "ดาวน์โหลดเทมเพลต (.csv)" แล้วอัปโหลดไฟล์:\nตัวอย่าง: เมืองหลวงของไทยคือข้อใด?,เชียงใหม่,กรุงเทพมหานคร,ภูเก็ต,ขอนแก่น,B,15'}
                   className="w-full p-2.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 font-mono"
                 />
                 {csvFeedback && <p className="text-xs text-cyan-300 font-semibold">{csvFeedback}</p>}
@@ -715,18 +916,40 @@ export function HostLobbyOverlay({
               </div>
 
               {/* Zombie CSV Importer */}
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2">
-                <div className="flex items-center justify-between gap-2">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-bold text-emerald-400">
-                    นำเข้า CSV (ระดับ easy/medium/hard, โจทย์บนหัวซอมบี้, คำตอบ, คำตอบสำรองคั่นด้วย |)
+                    นำเข้า CSV / สเปรดชีต (ระดับ, โจทย์บนหัวซอมบี้, คำตอบ, คำตอบสำรอง)
                   </span>
-                  <button
-                    type="button"
-                    onClick={handleImportZombieCsv}
-                    className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs cursor-pointer shrink-0"
-                  >
-                    แปลงข้อมูล CSV
-                  </button>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTemplate('zombie')}
+                      className="px-2.5 py-1 rounded-lg border border-cyan-500/50 bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      ดาวน์โหลดเทมเพลต (.csv)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSpreadsheetFeedback(null);
+                        setTemplateCopied(false);
+                        setSpreadsheetModalMode('zombie');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-extrabold text-xs flex items-center gap-1 cursor-pointer"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      นำเข้าจากสเปรดชีต / อัปโหลด CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleImportZombieCsv}
+                      className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs cursor-pointer shrink-0"
+                    >
+                      แปลงข้อมูล CSV
+                    </button>
+                  </div>
                 </div>
                 <textarea
                   rows={3}
@@ -913,6 +1136,112 @@ export function HostLobbyOverlay({
               >
                 บันทึกโจทย์ซอมบี้
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Blooket-style Spreadsheet Import Modal */}
+      {spreadsheetModalMode && (
+        <div
+          className="fixed inset-0 z-40 pointer-events-auto flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(2, 6, 23, 0.82)' }}
+        >
+          <div className="relative w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 text-slate-100 p-5 sm:p-6 shadow-2xl space-y-4">
+            <button
+              type="button"
+              onClick={() => setSpreadsheetModalMode(null)}
+              aria-label="ปิดหน้าต่างนำเข้าจากสเปรดชีต"
+              className="absolute top-3.5 right-3.5 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="text-center space-y-1 pt-1">
+              <h3 className="font-display text-2xl font-black text-white">นำเข้าจากสเปรดชีต</h3>
+              <p className="text-xs text-slate-400">
+                {spreadsheetModalMode === 'quiz'
+                  ? 'เทมเพลตคำถาม 4 ตัวเลือก (รองรับ Excel / Google Sheets)'
+                  : 'เทมเพลตโจทย์ซอมบี้ตรรกศาสตร์ (รองรับ Excel / Google Sheets)'}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-700/90 bg-slate-950/75 p-2.5">
+              <div className="rounded-lg border-2 border-dashed border-slate-600/90 px-5 py-6 space-y-5">
+                <ol className="space-y-3 text-base sm:text-lg text-slate-100 leading-relaxed font-medium">
+                  <li className="flex flex-wrap items-baseline gap-1.5">
+                    <span className="font-bold text-slate-300 mr-0.5">1.</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyTemplate(spreadsheetModalMode)}
+                      className="text-cyan-400 hover:text-cyan-300 underline underline-offset-4 font-bold cursor-pointer"
+                    >
+                      {templateCopied ? 'คัดลอกแล้ว!' : 'คัดลอก'}
+                    </button>
+                    <span>หรือ</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTemplate(spreadsheetModalMode)}
+                      className="text-cyan-400 hover:text-cyan-300 underline underline-offset-4 font-bold cursor-pointer"
+                    >
+                      ดาวน์โหลด
+                    </button>
+                    <span>เทมเพลตของเรา</span>
+                  </li>
+                  <li>
+                    <span className="font-bold text-slate-300 mr-1.5">2.</span>
+                    <span>กรอกข้อมูลให้ครบถ้วนแล้วส่งออกเป็นไฟล์ CSV</span>
+                  </li>
+                  <li>
+                    <span className="font-bold text-slate-300 mr-1.5">3.</span>
+                    <span>อัปโหลดด้านล่าง</span>
+                  </li>
+                </ol>
+
+                {spreadsheetFeedback && (
+                  <p className="text-xs text-cyan-300 font-semibold text-center leading-snug">
+                    {spreadsheetFeedback}
+                  </p>
+                )}
+
+                <div className="flex justify-center pt-1">
+                  <input
+                    ref={quizCsvInputRef}
+                    type="file"
+                    accept=".csv,.tsv,.txt,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = '';
+                      void handleUploadQuizCsvFile(f);
+                    }}
+                  />
+                  <input
+                    ref={zombieCsvInputRef}
+                    type="file"
+                    accept=".csv,.tsv,.txt,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = '';
+                      void handleUploadZombieCsvFile(f);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (spreadsheetModalMode === 'quiz') {
+                        quizCsvInputRef.current?.click();
+                      } else {
+                        zombieCsvInputRef.current?.click();
+                      }
+                    }}
+                    className="px-7 py-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-base flex items-center gap-2 shadow-[0_4px_0_0_#0891b2] active:translate-y-0.5 cursor-pointer transition-all"
+                  >
+                    <Upload className="w-5 h-5" />
+                    อัปโหลด CSV
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

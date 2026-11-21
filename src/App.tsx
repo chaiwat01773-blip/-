@@ -6,6 +6,8 @@ import {
   type GameStateSnapshot,
   type LogicPuzzle,
   type QuizQuestion,
+  type TeamId,
+  type TeamZombieGameEntry,
   type ZombieBreachEvent,
   type ZombieGameSnapshot,
   type ZombieShotEvent,
@@ -20,6 +22,10 @@ import { HostLobbyOverlay } from './components/HostLobbyOverlay.tsx';
 import { PlayerLobbyOverlay } from './components/PlayerLobbyOverlay.tsx';
 import { GameHudOverlay } from './components/GameHudOverlay.tsx';
 import { ZombieGameView } from './components/ZombieGameView.tsx';
+import {
+  ZombieTeamMonitorView,
+  type MonitorCombatHandlers,
+} from './components/ZombieTeamMonitorView.tsx';
 
 export default function App() {
   const socketRef = useRef<Socket | null>(null);
@@ -33,15 +39,36 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('arena');
+  const [quizDockCollapsed, setQuizDockCollapsed] = useState(false);
   const [zombieAvatar, setZombieAvatar] = useState<BlookAvatarId | null>(null);
   const [hostAvatar, setHostAvatar] = useState<BlookAvatarId>('robot');
   const [mpZombieState, setMpZombieState] = useState<ZombieGameSnapshot | null>(null);
+  const [mpZombieTeamsState, setMpZombieTeamsState] = useState<TeamZombieGameEntry[] | null>(null);
   const [mpZombieShot, setMpZombieShot] = useState<ZombieShotEvent | null>(null);
   const [mpZombieWrong, setMpZombieWrong] = useState<ZombieWrongEvent | null>(null);
   const [mpZombieBreach, setMpZombieBreach] = useState<ZombieBreachEvent | null>(null);
+  const monitorHandlersRef = useRef<MonitorCombatHandlers | null>(null);
+  const registerMonitorCombatHandlers = useCallback(
+    (handlers: MonitorCombatHandlers | null) => {
+      monitorHandlersRef.current = handlers;
+    },
+    [],
+  );
 
   const prevPhaseRef = useRef<string | null>(null);
   const prevPlayerCountRef = useRef<number>(0);
+
+  const handleToggleQuizDock = useCallback(() => {
+    setQuizDockCollapsed((prev) => !prev);
+  }, []);
+
+  useEffect(() => {
+    if (snapshot?.phase === 'question') {
+      setQuizDockCollapsed(false);
+    } else if (!snapshot || snapshot.phase === 'lobby' || snapshot.phase === 'podium') {
+      setQuizDockCollapsed(false);
+    }
+  }, [snapshot?.phase, snapshot?.currentQuestionIndex]);
 
   const { initialPin, hasQrPin } = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -100,6 +127,7 @@ export default function App() {
         setJoinError(null);
         setSnapshot(payload.snapshot);
         setMpZombieState(payload.snapshot.zombieState);
+        setMpZombieTeamsState(payload.snapshot.zombieTeamsState ?? null);
         setCameraPreset('arena');
         soundEngine.playJoin();
       },
@@ -122,6 +150,7 @@ export default function App() {
         setJoinError(null);
         setSnapshot(payload.snapshot);
         setMpZombieState(payload.snapshot.zombieState);
+        setMpZombieTeamsState(payload.snapshot.zombieTeamsState ?? null);
         setCameraPreset('follow');
         soundEngine.playJoin();
       },
@@ -136,8 +165,10 @@ export default function App() {
       setSnapshot(nextState);
       if (nextState.phase === 'zombie') {
         setMpZombieState(nextState.zombieState);
+        setMpZombieTeamsState(nextState.zombieTeamsState ?? null);
       } else {
         setMpZombieState(null);
+        setMpZombieTeamsState(null);
         setMpZombieShot(null);
         setMpZombieWrong(null);
         setMpZombieBreach(null);
@@ -148,16 +179,23 @@ export default function App() {
       setMpZombieState(zSnap);
     });
 
+    socket.on('zombie_teams_state', (teamsSnap: TeamZombieGameEntry[]) => {
+      setMpZombieTeamsState(teamsSnap);
+    });
+
     socket.on('zombie_shot', (shot: ZombieShotEvent) => {
       setMpZombieShot(shot);
+      monitorHandlersRef.current?.onShot(shot);
     });
 
     socket.on('zombie_wrong', (wrong: ZombieWrongEvent) => {
       setMpZombieWrong(wrong);
+      monitorHandlersRef.current?.onWrong(wrong);
     });
 
     socket.on('zombie_breach', (breach: ZombieBreachEvent) => {
       setMpZombieBreach(breach);
+      monitorHandlersRef.current?.onBreach(breach);
     });
 
     socket.on(
@@ -177,6 +215,7 @@ export default function App() {
       setPlayerId(null);
       setSnapshot(null);
       setMpZombieState(null);
+      setMpZombieTeamsState(null);
       showToast(payload.message);
     });
 
@@ -185,6 +224,7 @@ export default function App() {
       setPlayerId(null);
       setSnapshot(null);
       setMpZombieState(null);
+      setMpZombieTeamsState(null);
       showToast(payload.message);
       soundEngine.playWrong();
     });
@@ -266,7 +306,13 @@ export default function App() {
     setPlayerId(null);
     setSnapshot(null);
     setMpZombieState(null);
+    setMpZombieTeamsState(null);
     setCameraPreset('arena');
+  }, []);
+
+  const handleSelectTeam = useCallback((team: TeamId) => {
+    soundEngine.playClick();
+    socketRef.current?.emit('select_team', { team });
   }, []);
 
   const handleKickPlayer = useCallback(
@@ -388,6 +434,51 @@ export default function App() {
   const inMpZombie = Boolean(inRoom && snapshot?.phase === 'zombie' && role);
 
   if (inMpZombie && snapshot && role) {
+    if (snapshot.mode === 'zombie_teams') {
+      if (role === 'host') {
+        return (
+          <ZombieTeamMonitorView
+            pin={snapshot.pin}
+            teams={mpZombieTeamsState || snapshot.zombieTeamsState || []}
+            muted={muted}
+            onToggleMute={handleToggleMute}
+            onPauseToggle={handleMpZombiePause}
+            onRestart={handleMpZombieRestart}
+            onBackToLobby={handleRestartLobby}
+            onExit={handleLeaveOrClose}
+            registerCombatHandlers={registerMonitorCombatHandlers}
+          />
+        );
+      }
+
+      const me = snapshot.players.find((p) => p.id === playerId);
+      const localDefenderId = playerId || 'local';
+      const localAvatar: BlookAvatarId = me?.avatar || 'fox';
+      return (
+        <ZombieGameView
+          avatarId={localAvatar}
+          muted={muted}
+          onToggleMute={handleToggleMute}
+          onExit={handleLeaveOrClose}
+          multiplayer={{
+            pin: snapshot.pin,
+            role,
+            localDefenderId,
+            teamId: me?.team || 'A',
+            splitScreen: true,
+            zombieState: mpZombieState || snapshot.zombieState,
+            lastShot: mpZombieShot,
+            lastWrong: mpZombieWrong,
+            lastBreach: mpZombieBreach,
+            onShoot: handleMpZombieShoot,
+            onPauseToggle: handleMpZombiePause,
+            onRestart: handleMpZombieRestart,
+            onBackToLobby: handleRestartLobby,
+          }}
+        />
+      );
+    }
+
     const localDefenderId = role === 'host' ? 'host' : playerId || 'local';
     const me = snapshot.players.find((p) => p.id === playerId);
     const localAvatar: BlookAvatarId = role === 'host' ? hostAvatar : me?.avatar || 'fox';
@@ -426,20 +517,28 @@ export default function App() {
     );
   }
 
+  const inActiveQuiz = Boolean(
+    inRoom && snapshot && (snapshot.phase === 'question' || snapshot.phase === 'reveal'),
+  );
+  const splitQuizScreen = inActiveQuiz && !quizDockCollapsed;
+
   return (
-    <div className="relative w-full h-dvh overflow-hidden select-none">
-      {/* Persistent Full-Bleed Three.js 3D Arena Canvas */}
-      <ThreeArenaCanvas
-        inRoom={inRoom}
-        localPlayerId={playerId}
-        phase={snapshot?.phase || 'lobby'}
-        correctIndex={snapshot?.correctIndex ?? null}
-        players={snapshot?.players || []}
-        cameraPreset={cameraPreset}
-        sceneRefOut={sceneRef}
-        onLocalMove={handleLocalMove}
-        onPadSelect={handleSubmitAnswer}
-      />
+    <div className="relative w-full h-dvh flex flex-col overflow-hidden select-none bg-[#0b1628]">
+      {/* Persistent Top / Full-Screen Three.js 3D Arena Display */}
+      <div className="relative flex-1 min-h-0 w-full overflow-hidden">
+        <ThreeArenaCanvas
+          inRoom={inRoom}
+          localPlayerId={playerId}
+          phase={snapshot?.phase || 'lobby'}
+          correctIndex={snapshot?.correctIndex ?? null}
+          players={snapshot?.players || []}
+          cameraPreset={cameraPreset}
+          splitScreen={splitQuizScreen}
+          sceneRefOut={sceneRef}
+          onLocalMove={handleLocalMove}
+          onPadSelect={handleSubmitAnswer}
+        />
+      </div>
 
       {/* Non-blocking Toast Banner */}
       {toastMsg && (
@@ -492,6 +591,7 @@ export default function App() {
           muted={muted}
           onToggleMute={handleToggleMute}
           onLeaveRoom={handleLeaveOrClose}
+          onSelectTeam={handleSelectTeam}
         />
       )}
 
@@ -502,6 +602,8 @@ export default function App() {
           playerId={playerId}
           muted={muted}
           cameraPreset={cameraPreset}
+          dockCollapsed={quizDockCollapsed}
+          onToggleDockCollapsed={handleToggleQuizDock}
           onChangeCamera={setCameraPreset}
           onToggleMute={handleToggleMute}
           onSubmitAnswer={handleSubmitAnswer}

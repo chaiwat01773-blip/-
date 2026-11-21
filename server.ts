@@ -24,6 +24,8 @@ import type {
   PublicQuestionPayload,
   QuestionPack,
   QuizQuestion,
+  TeamId,
+  TeamZombieGameEntry,
   ZombieBreachEvent,
   ZombieDefenderPublic,
   ZombieEntityPublic,
@@ -32,6 +34,8 @@ import type {
   ZombieTier,
   ZombieWrongEvent,
 } from './src/shared/types.ts';
+
+const TEAM_IDS: TeamId[] = ['A', 'B', 'C', 'D'];
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,10 +47,12 @@ const IS_PROD =
   (process.env.NODE_ENV !== 'development' && fs.existsSync(DIST_INDEX));
 
 interface ServerPlayer extends PlayerPublicState {
+  team: TeamId;
   answerTimestamp: number | null;
 }
 
 interface ZombieSimulation {
+  teamId?: TeamId;
   hp: number;
   maxHp: number;
   teamScore: number;
@@ -82,6 +88,7 @@ interface RoomState {
   zombiePuzzles: LogicPuzzle[];
   zombieAutoFill: boolean;
   zombieSim: ZombieSimulation | null;
+  zombieTeamSims: Map<TeamId, ZombieSimulation>;
   zombieInterval: ReturnType<typeof setInterval> | null;
 }
 
@@ -97,11 +104,28 @@ function generatePin(): string {
   return String(Date.now()).slice(-6);
 }
 
+function normalizeTeamId(raw: unknown): TeamId {
+  return raw === 'A' || raw === 'B' || raw === 'C' || raw === 'D' ? raw : 'A';
+}
+
+function pickBalancedDefaultTeam(room: RoomState): TeamId {
+  const counts: Record<TeamId, number> = { A: 0, B: 0, C: 0, D: 0 };
+  for (const p of room.players.values()) {
+    counts[p.team] = (counts[p.team] || 0) + 1;
+  }
+  let best: TeamId = 'A';
+  for (const t of TEAM_IDS) {
+    if (counts[t] < counts[best]) best = t;
+  }
+  return best;
+}
+
 function toPublicPlayers(room: RoomState, hideAnswers: boolean): PlayerPublicState[] {
   return Array.from(room.players.values()).map((p) => ({
     id: p.id,
     name: p.name,
     avatar: p.avatar,
+    team: p.team,
     score: p.score,
     streak: p.streak,
     lastPointsEarned: p.lastPointsEarned,
@@ -138,10 +162,10 @@ function computeOptionCounts(room: RoomState): [number, number, number, number] 
   return counts;
 }
 
-function buildZombieSnapshot(room: RoomState): ZombieGameSnapshot | null {
-  const sim = room.zombieSim;
+function buildZombieSnapshotFromSim(sim: ZombieSimulation | null | undefined): ZombieGameSnapshot | null {
   if (!sim) return null;
   return {
+    teamId: sim.teamId,
     hp: sim.hp,
     maxHp: sim.maxHp,
     teamScore: sim.teamScore,
@@ -167,11 +191,42 @@ function buildZombieSnapshot(room: RoomState): ZombieGameSnapshot | null {
   };
 }
 
-function buildSnapshot(room: RoomState, forHost: boolean): GameStateSnapshot {
+function buildZombieTeamsEntries(room: RoomState): TeamZombieGameEntry[] {
+  const entries: TeamZombieGameEntry[] = [];
+  for (const teamId of TEAM_IDS) {
+    const sim = room.zombieTeamSims.get(teamId);
+    if (!sim) continue;
+    const snap = buildZombieSnapshotFromSim(sim);
+    if (!snap) continue;
+    entries.push({
+      teamId,
+      memberCount: sim.defenders.size,
+      snapshot: snap,
+    });
+  }
+  return entries;
+}
+
+function buildSnapshot(room: RoomState, forHost: boolean, viewerTeam?: TeamId): GameStateSnapshot {
   const q = room.questions[room.currentQuestionIndex];
   const hideAnswers = room.phase === 'question' && !forHost;
   const showCorrect =
     room.phase === 'reveal' || room.phase === 'podium' || (forHost && room.phase === 'question');
+
+  let zombieState: ZombieGameSnapshot | null = null;
+  let zombieTeamsState: TeamZombieGameEntry[] | null = null;
+
+  if (room.phase === 'zombie') {
+    if (room.mode === 'zombie_teams') {
+      if (forHost) {
+        zombieTeamsState = buildZombieTeamsEntries(room);
+      } else if (viewerTeam) {
+        zombieState = buildZombieSnapshotFromSim(room.zombieTeamSims.get(viewerTeam));
+      }
+    } else {
+      zombieState = buildZombieSnapshotFromSim(room.zombieSim);
+    }
+  }
 
   return {
     pin: room.pin,
@@ -189,7 +244,8 @@ function buildSnapshot(room: RoomState, forHost: boolean): GameStateSnapshot {
     zombiePuzzleCount: room.zombiePuzzles.length,
     zombiePuzzles: forHost ? room.zombiePuzzles : [],
     zombieAutoFill: room.zombieAutoFill,
-    zombieState: room.phase === 'zombie' ? buildZombieSnapshot(room) : null,
+    zombieState,
+    zombieTeamsState,
   };
 }
 
@@ -365,26 +421,48 @@ async function startServer() {
 
   function broadcastState(room: RoomState) {
     io.to(room.hostId).emit('game_state', buildSnapshot(room, true));
-    for (const playerId of room.players.keys()) {
-      io.to(playerId).emit('game_state', buildSnapshot(room, false));
+    for (const [playerId, player] of room.players.entries()) {
+      io.to(playerId).emit('game_state', buildSnapshot(room, false, player.team));
+    }
+  }
+
+  function emitToZombieAudience(room: RoomState, teamId: TeamId | undefined, event: string, data: unknown) {
+    if (!teamId || room.mode !== 'zombie_teams') {
+      io.to(room.pin).emit(event, data);
+      return;
+    }
+    io.to(room.hostId).emit(event, data);
+    for (const [playerId, player] of room.players.entries()) {
+      if (player.team === teamId) {
+        io.to(playerId).emit(event, data);
+      }
     }
   }
 
   function broadcastZombieState(room: RoomState) {
-    const zSnap = buildZombieSnapshot(room);
+    if (room.mode === 'zombie_teams') {
+      const entries = buildZombieTeamsEntries(room);
+      io.to(room.hostId).emit('zombie_teams_state', entries);
+      for (const [playerId, player] of room.players.entries()) {
+        const snap = buildZombieSnapshotFromSim(room.zombieTeamSims.get(player.team));
+        if (snap) {
+          io.to(playerId).emit('zombie_state', snap);
+        }
+      }
+      return;
+    }
+
+    const zSnap = buildZombieSnapshotFromSim(room.zombieSim);
     if (!zSnap) return;
     io.to(room.pin).emit('zombie_state', zSnap);
   }
 
-  function tickZombieRoom(room: RoomState) {
-    const sim = room.zombieSim;
-    if (!sim || room.phase !== 'zombie') return;
-
+  function stepSingleZombieSim(room: RoomState, sim: ZombieSimulation): boolean {
     const now = Date.now();
     const dt = Math.min(0.2, Math.max(0.02, (now - sim.lastTickAt) / 1000));
     sim.lastTickAt = now;
 
-    if (sim.paused || sim.gameOver) return;
+    if (sim.paused || sim.gameOver) return false;
 
     // 1. Check Boss Wave trigger (every 3 waves: Wave 3, 6, 9...)
     const hasBossAlive = sim.zombies.some((z) => z.isBoss);
@@ -434,7 +512,6 @@ async function startServer() {
           }
           sim.zombies.splice(i, 1);
 
-          // Remaining zombies surge forward to finish off the near-dead base!
           for (const rem of sim.zombies) {
             rem.enraged = true;
             rem.speed = Math.max(rem.speed, Number((6.6 + Math.random() * 1.4).toFixed(2)));
@@ -455,6 +532,7 @@ async function startServer() {
           }
 
           const bossBreach: ZombieBreachEvent = {
+            teamId: sim.teamId,
             zombieId: z.id,
             x: -8.1,
             z: z.z,
@@ -463,7 +541,7 @@ async function startServer() {
             isBoss: true,
             stampedeTriggered: true,
           };
-          io.to(room.pin).emit('zombie_breach', bossBreach);
+          emitToZombieAudience(room, sim.teamId, 'zombie_breach', bossBreach);
           continue;
         }
 
@@ -481,13 +559,14 @@ async function startServer() {
         sim.zombies.splice(i, 1);
 
         const breachEvent: ZombieBreachEvent = {
+          teamId: sim.teamId,
           zombieId: z.id,
           x: -8.1,
           z: z.z,
           damage: dmg,
           hpRemaining: sim.hp,
         };
-        io.to(room.pin).emit('zombie_breach', breachEvent);
+        emitToZombieAudience(room, sim.teamId, 'zombie_breach', breachEvent);
 
         if (sim.hp <= 0) {
           sim.gameOver = true;
@@ -495,13 +574,65 @@ async function startServer() {
       }
     }
 
-    broadcastZombieState(room);
+    return true;
+  }
+
+  function tickZombieRoom(room: RoomState) {
+    if (room.phase !== 'zombie') return;
+    if (room.mode === 'zombie_teams') {
+      let anyUpdated = false;
+      for (const sim of room.zombieTeamSims.values()) {
+        if (stepSingleZombieSim(room, sim)) {
+          anyUpdated = true;
+        }
+      }
+      if (anyUpdated) {
+        broadcastZombieState(room);
+      }
+      return;
+    }
+
+    const sim = room.zombieSim;
+    if (!sim) return;
+    if (stepSingleZombieSim(room, sim)) {
+      broadcastZombieState(room);
+    }
+  }
+
+  function createSimForDefenders(
+    room: RoomState,
+    defenders: Map<string, ZombieDefenderPublic>,
+    teamId?: TeamId,
+  ): ZombieSimulation {
+    const sim: ZombieSimulation = {
+      teamId,
+      hp: 100,
+      maxHp: 100,
+      teamScore: 0,
+      wave: 1,
+      kills: 0,
+      paused: false,
+      gameOver: false,
+      bossRushActive: false,
+      lastBossWave: 0,
+      zombies: [],
+      defenders,
+      spawnTimer: 1.0,
+      lastTickAt: Date.now(),
+      puzzleCursor: 0,
+    };
+
+    layoutDefenderZPositions(sim);
+    spawnZombieInSim(room, sim, 10.8, -1.6);
+    spawnZombieInSim(room, sim, 14.0, 1.8);
+    return sim;
   }
 
   function startZombieGame(room: RoomState) {
     clearRoomTimer(room);
     room.mode = 'zombie';
     room.phase = 'zombie';
+    room.zombieTeamSims.clear();
 
     const defenders = new Map<string, ZombieDefenderPublic>();
     defenders.set('host', {
@@ -535,27 +666,56 @@ async function startServer() {
       });
     }
 
-    const sim: ZombieSimulation = {
-      hp: 100,
-      maxHp: 100,
-      teamScore: 0,
-      wave: 1,
-      kills: 0,
-      paused: false,
-      gameOver: false,
-      bossRushActive: false,
-      lastBossWave: 0,
-      zombies: [],
-      defenders,
-      spawnTimer: 1.0,
-      lastTickAt: Date.now(),
-      puzzleCursor: 0,
-    };
+    room.zombieSim = createSimForDefenders(room, defenders);
+    broadcastState(room);
 
-    layoutDefenderZPositions(sim);
-    spawnZombieInSim(room, sim, 10.8, -1.6);
-    spawnZombieInSim(room, sim, 14.0, 1.8);
-    room.zombieSim = sim;
+    room.zombieInterval = setInterval(() => {
+      tickZombieRoom(room);
+    }, 100);
+  }
+
+  function startZombieTeamsGame(room: RoomState) {
+    clearRoomTimer(room);
+    room.mode = 'zombie_teams';
+    room.phase = 'zombie';
+    room.zombieSim = null;
+    room.zombieTeamSims.clear();
+
+    const teamGroups = new Map<TeamId, Map<string, ZombieDefenderPublic>>();
+    for (const p of room.players.values()) {
+      p.score = 0;
+      p.streak = 0;
+      p.lastPointsEarned = 0;
+      const t = p.team || 'A';
+      let map = teamGroups.get(t);
+      if (!map) {
+        map = new Map<string, ZombieDefenderPublic>();
+        teamGroups.set(t, map);
+      }
+      map.set(p.id, {
+        id: p.id,
+        name: p.name,
+        avatar: p.avatar,
+        isHost: false,
+        score: 0,
+        kills: 0,
+        streak: 0,
+        bestStreak: 0,
+        explosiveAmmo: 1,
+        zPos: 0,
+      });
+    }
+
+    // Ensure at least Team A arena exists if host starts before players join
+    if (teamGroups.size === 0) {
+      teamGroups.set('A', new Map());
+    }
+
+    for (const t of TEAM_IDS) {
+      const defenders = teamGroups.get(t);
+      if (!defenders) continue;
+      room.zombieTeamSims.set(t, createSimForDefenders(room, defenders, t));
+    }
 
     broadcastState(room);
 
@@ -642,7 +802,12 @@ async function startServer() {
           payload?.pack && Array.isArray(payload.pack.questions) && payload.pack.questions.length > 0
             ? payload.pack
             : defaultPack;
-        const mode: GameMode = payload?.mode === 'zombie' ? 'zombie' : 'quiz';
+        const mode: GameMode =
+          payload?.mode === 'zombie_teams'
+            ? 'zombie_teams'
+            : payload?.mode === 'zombie'
+              ? 'zombie'
+              : 'quiz';
         const hostAvatar: BlookAvatarId = payload?.hostAvatar || 'robot';
 
         const room: RoomState = {
@@ -668,6 +833,7 @@ async function startServer() {
           })),
           zombieAutoFill: true,
           zombieSim: null,
+          zombieTeamSims: new Map(),
           zombieInterval: null,
         };
 
@@ -715,7 +881,12 @@ async function startServer() {
       const room = rooms.get(mapping.pin);
       if (!room || room.hostId !== socket.id || room.phase !== 'lobby') return;
 
-      room.mode = payload?.mode === 'zombie' ? 'zombie' : 'quiz';
+      room.mode =
+        payload?.mode === 'zombie_teams'
+          ? 'zombie_teams'
+          : payload?.mode === 'zombie'
+            ? 'zombie'
+            : 'quiz';
       broadcastState(room);
     });
 
@@ -825,10 +996,12 @@ async function startServer() {
         cleanupSocket(socket.id, true);
 
         const spawn = spawnPositionForIndex(room.players.size);
+        const defaultTeam = pickBalancedDefaultTeam(room);
         const player: ServerPlayer = {
           id: socket.id,
           name,
           avatar,
+          team: defaultTeam,
           score: 0,
           streak: 0,
           lastPointsEarned: 0,
@@ -845,32 +1018,97 @@ async function startServer() {
         socketToRoom.set(socket.id, { pin, role: 'player' });
         socket.join(pin);
 
-        // If joining mid-game during Zombie Defense Co-op, spawn defender on barricade immediately
-        if (room.phase === 'zombie' && room.zombieSim) {
-          room.zombieSim.defenders.set(socket.id, {
-            id: socket.id,
-            name,
-            avatar,
-            isHost: false,
-            score: 0,
-            kills: 0,
-            streak: 0,
-            bestStreak: 0,
-            explosiveAmmo: 1,
-            zPos: 0,
-          });
-          layoutDefenderZPositions(room.zombieSim);
+        // If joining mid-game during Zombie modes, spawn defender on barricade immediately
+        if (room.phase === 'zombie') {
+          if (room.mode === 'zombie_teams') {
+            let teamSim = room.zombieTeamSims.get(defaultTeam);
+            if (!teamSim) {
+              teamSim = createSimForDefenders(room, new Map(), defaultTeam);
+              room.zombieTeamSims.set(defaultTeam, teamSim);
+            }
+            teamSim.defenders.set(socket.id, {
+              id: socket.id,
+              name,
+              avatar,
+              isHost: false,
+              score: 0,
+              kills: 0,
+              streak: 0,
+              bestStreak: 0,
+              explosiveAmmo: 1,
+              zPos: 0,
+            });
+            layoutDefenderZPositions(teamSim);
+          } else if (room.zombieSim) {
+            room.zombieSim.defenders.set(socket.id, {
+              id: socket.id,
+              name,
+              avatar,
+              isHost: false,
+              score: 0,
+              kills: 0,
+              streak: 0,
+              bestStreak: 0,
+              explosiveAmmo: 1,
+              zPos: 0,
+            });
+            layoutDefenderZPositions(room.zombieSim);
+          }
         }
 
         socket.emit('join_success', {
           pin,
           playerId: socket.id,
-          snapshot: buildSnapshot(room, false),
+          snapshot: buildSnapshot(room, false, player.team),
         });
 
         broadcastState(room);
       },
     );
+
+    socket.on('select_team', (payload: { team: TeamId }) => {
+      const mapping = socketToRoom.get(socket.id);
+      if (!mapping || mapping.role !== 'player') return;
+      const room = rooms.get(mapping.pin);
+      if (!room) return;
+      const player = room.players.get(socket.id);
+      if (!player) return;
+
+      const nextTeam = normalizeTeamId(payload?.team);
+      if (player.team === nextTeam) return;
+      const prevTeam = player.team;
+      player.team = nextTeam;
+
+      // Also support mid-game team move if room is in zombie_teams phase
+      if (room.phase === 'zombie' && room.mode === 'zombie_teams') {
+        const oldSim = room.zombieTeamSims.get(prevTeam);
+        if (oldSim) {
+          oldSim.defenders.delete(socket.id);
+          layoutDefenderZPositions(oldSim);
+        }
+        let nextSim = room.zombieTeamSims.get(nextTeam);
+        if (!nextSim) {
+          nextSim = createSimForDefenders(room, new Map(), nextTeam);
+          room.zombieTeamSims.set(nextTeam, nextSim);
+        }
+        nextSim.defenders.set(socket.id, {
+          id: socket.id,
+          name: player.name,
+          avatar: player.avatar,
+          isHost: false,
+          score: 0,
+          kills: 0,
+          streak: 0,
+          bestStreak: 0,
+          explosiveAmmo: 1,
+          zPos: 0,
+        });
+        layoutDefenderZPositions(nextSim);
+        broadcastZombieState(room);
+      }
+
+      broadcastState(room);
+    });
 
     socket.on('kick_player', ({ pin, playerId }: { pin: string; playerId: string }) => {
       const room = rooms.get(pin);
@@ -885,6 +1123,11 @@ async function startServer() {
         room.zombieSim.defenders.delete(playerId);
         layoutDefenderZPositions(room.zombieSim);
       }
+      for (const sim of room.zombieTeamSims.values()) {
+        if (sim.defenders.delete(playerId)) {
+          layoutDefenderZPositions(sim);
+        }
+      }
 
       const targetSocket = io.sockets.sockets.get(playerId);
       if (targetSocket) {
@@ -898,6 +1141,11 @@ async function startServer() {
     socket.on('start_game', ({ pin }: { pin: string }) => {
       const room = rooms.get(pin);
       if (!room || room.hostId !== socket.id) return;
+
+      if (room.mode === 'zombie_teams') {
+        startZombieTeamsGame(room);
+        return;
+      }
 
       if (room.mode === 'zombie') {
         startZombieGame(room);
@@ -933,6 +1181,7 @@ async function startServer() {
       if (!room || room.hostId !== socket.id) return;
       clearRoomTimer(room);
       room.zombieSim = null;
+      room.zombieTeamSims.clear();
       room.phase = 'lobby';
       room.currentQuestionIndex = 0;
       let idx = 0;
@@ -954,8 +1203,18 @@ async function startServer() {
     // Multiplayer Zombie Defense Controls
     socket.on('zombie_pause', ({ pin, paused }: { pin: string; paused: boolean }) => {
       const room = rooms.get(pin);
-      if (!room || room.hostId !== socket.id || room.phase !== 'zombie' || !room.zombieSim) return;
-      if (room.zombieSim.gameOver) return;
+      if (!room || room.hostId !== socket.id || room.phase !== 'zombie') return;
+      if (room.mode === 'zombie_teams') {
+        for (const sim of room.zombieTeamSims.values()) {
+          if (!sim.gameOver) {
+            sim.paused = Boolean(paused);
+            sim.lastTickAt = Date.now();
+          }
+        }
+        broadcastZombieState(room);
+        return;
+      }
+      if (!room.zombieSim || room.zombieSim.gameOver) return;
       room.zombieSim.paused = Boolean(paused);
       room.zombieSim.lastTickAt = Date.now();
       broadcastZombieState(room);
@@ -963,7 +1222,12 @@ async function startServer() {
 
     socket.on('zombie_restart', ({ pin }: { pin: string }) => {
       const room = rooms.get(pin);
-      if (!room || room.hostId !== socket.id || room.mode !== 'zombie') return;
+      if (!room || room.hostId !== socket.id) return;
+      if (room.mode === 'zombie_teams') {
+        startZombieTeamsGame(room);
+        return;
+      }
+      if (room.mode !== 'zombie') return;
       startZombieGame(room);
     });
 
@@ -973,11 +1237,23 @@ async function startServer() {
         const mapping = socketToRoom.get(socket.id);
         if (!mapping) return;
         const room = rooms.get(mapping.pin);
-        if (!room || room.phase !== 'zombie' || !room.zombieSim) return;
-        const sim = room.zombieSim;
-        if (sim.paused || sim.gameOver) return;
+        if (!room || room.phase !== 'zombie') return;
 
-        const defenderId = mapping.role === 'host' && room.hostId === socket.id ? 'host' : socket.id;
+        let sim: ZombieSimulation | undefined | null = null;
+        let defenderId = socket.id;
+
+        if (room.mode === 'zombie_teams') {
+          if (mapping.role !== 'player') return;
+          const player = room.players.get(socket.id);
+          if (!player) return;
+          sim = room.zombieTeamSims.get(player.team);
+        } else {
+          sim = room.zombieSim;
+          defenderId = mapping.role === 'host' && room.hostId === socket.id ? 'host' : socket.id;
+        }
+
+        if (!sim || sim.paused || sim.gameOver) return;
+
         const defender = sim.defenders.get(defenderId);
         if (!defender) return;
 
@@ -1017,13 +1293,14 @@ async function startServer() {
           }
 
           const wrongEvent: ZombieWrongEvent = {
+            teamId: sim.teamId,
             shooterId: defender.id,
             shooterName: defender.name,
             zombieId: target.id,
             newSpeed: target.speed,
             newPrompt: target.puzzle.prompt,
           };
-          io.to(room.pin).emit('zombie_wrong', wrongEvent);
+          emitToZombieAudience(room, sim.teamId, 'zombie_wrong', wrongEvent);
           broadcastZombieState(room);
           return;
         }
@@ -1040,7 +1317,6 @@ async function startServer() {
           const nextStep = (target.bossStep ?? 0) + stepAdvance;
           const prevPrompt = target.puzzle.prompt;
 
-          // If bomb used, also clear nearby regular minions
           const extraKilled = useBomb
             ? sim.zombies.filter(
                 (z) => !z.isBoss && Math.hypot(z.x - target!.x, z.z - target!.z) <= 7.5,
@@ -1078,6 +1354,7 @@ async function startServer() {
             sim.wave = 1 + Math.floor(sim.kills / 4);
 
             const shotEvent: ZombieShotEvent = {
+              teamId: sim.teamId,
               shooterId: defender.id,
               shooterName: defender.name,
               shooterZ: defender.zPos,
@@ -1092,7 +1369,7 @@ async function startServer() {
               bossHitOnly: true,
               newBossStep: nextStep,
             };
-            io.to(room.pin).emit('zombie_shot', shotEvent);
+            emitToZombieAudience(room, sim.teamId, 'zombie_shot', shotEvent);
             broadcastZombieState(room);
             return;
           }
@@ -1111,6 +1388,7 @@ async function startServer() {
           sim.wave = 1 + Math.floor(sim.kills / 4);
 
           const shotEvent: ZombieShotEvent = {
+            teamId: sim.teamId,
             shooterId: defender.id,
             shooterName: defender.name,
             shooterZ: defender.zPos,
@@ -1124,7 +1402,7 @@ async function startServer() {
             answerPrompt: prevPrompt,
             bossDefeated: true,
           };
-          io.to(room.pin).emit('zombie_shot', shotEvent);
+          emitToZombieAudience(room, sim.teamId, 'zombie_shot', shotEvent);
           broadcastZombieState(room);
           return;
         }
@@ -1162,6 +1440,7 @@ async function startServer() {
         sim.wave = 1 + Math.floor(sim.kills / 4);
 
         const shotEvent: ZombieShotEvent = {
+          teamId: sim.teamId,
           shooterId: defender.id,
           shooterName: defender.name,
           shooterZ: defender.zPos,
@@ -1175,7 +1454,7 @@ async function startServer() {
           answerPrompt: target.puzzle.prompt,
         };
 
-        io.to(room.pin).emit('zombie_shot', shotEvent);
+        emitToZombieAudience(room, sim.teamId, 'zombie_shot', shotEvent);
         broadcastZombieState(room);
       });
 
@@ -1289,9 +1568,19 @@ async function startServer() {
       }
     } else {
       room.players.delete(socketId);
+      let zombieUpdated = false;
       if (room.zombieSim) {
         room.zombieSim.defenders.delete(socketId);
         layoutDefenderZPositions(room.zombieSim);
+        zombieUpdated = true;
+      }
+      for (const sim of room.zombieTeamSims.values()) {
+        if (sim.defenders.delete(socketId)) {
+          layoutDefenderZPositions(sim);
+          zombieUpdated = true;
+        }
+      }
+      if (zombieUpdated) {
         broadcastZombieState(room);
       }
       const s = io.sockets.sockets.get(socketId);

@@ -1,4 +1,5 @@
 import type { LogicPuzzle, ZombieTier } from './types.ts';
+import { parseDelimitedRows } from './questionPacks.ts';
 
 export type { LogicPuzzle, ZombieTier };
 
@@ -534,44 +535,54 @@ export function pickReplacementPuzzle(
   return generateLogicPuzzle(current.tier);
 }
 
-function splitCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
+export const ZOMBIE_SPREADSHEET_TEMPLATE_HEADERS = [
+  'ระดับ (easy/medium/hard)',
+  'โจทย์บนหัวซอมบี้ (ขึ้นบรรทัดใหม่ได้)',
+  'คำตอบที่ถูกต้อง',
+  'คำตอบสำรองเพิ่มเติม (คั่นด้วย |)',
+  'ตัวเลือกช้อย 2-4 ข้อ (คั่นด้วย |)',
+];
 
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-    } else if (ch === ',' && !inQuotes) {
-      result.push(current.trim());
-      current = '';
-    } else {
-      current += ch;
-    }
+const ZOMBIE_TEMPLATE_SAMPLE_ROWS: string[][] = [
+  ['easy', 'P = จริง (T)\nQ = เท็จ (F)\nP ∧ Q ≡ ?', 'เท็จ (F)', 'F|False|เท็จ', 'จริง (T)|เท็จ (F)'],
+  ['medium', 'นิเสธของ P ∨ Q คือข้อใด?', '~P ∧ ~Q', '~P^~Q|!P&&!Q', '~P ∧ ~Q|~P ∨ ~Q|P ∧ ~Q|~P → Q'],
+  ['hard', '(P → Q) ∨ R เป็นเท็จ\nค่าของ P, Q, R คือ?', 'P=T, Q=F, R=F', 'P=T,Q=F,R=F|TFF', 'P=T, Q=F, R=F|P=F, Q=T, R=F|P=T, Q=T, R=F|P=F, Q=F, R=T'],
+  ['easy', '', '', '', ''],
+  ['medium', '', '', '', ''],
+  ['hard', '', '', '', ''],
+];
+
+function escapeZombieCsvCell(value: string): string {
+  if (/[",\r\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
   }
-  result.push(current.trim());
-  return result;
+  return value;
 }
 
-export function parseZombiePuzzlesFromCsv(csvText: string): LogicPuzzle[] {
-  const lines = csvText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
+export const ZOMBIE_SPREADSHEET_TEMPLATE_CSV = [
+  ZOMBIE_SPREADSHEET_TEMPLATE_HEADERS.map(escapeZombieCsvCell).join(','),
+  ...ZOMBIE_TEMPLATE_SAMPLE_ROWS.map((r) => r.map(escapeZombieCsvCell).join(',')),
+].join('\r\n');
 
+export const ZOMBIE_SPREADSHEET_TEMPLATE_TSV = [
+  ZOMBIE_SPREADSHEET_TEMPLATE_HEADERS.join('\t'),
+  ...ZOMBIE_TEMPLATE_SAMPLE_ROWS.map((r) => r.map((c) => c.replace(/\t|\r?\n/g, ' | ')).join('\t')),
+].join('\n');
+
+export function parseZombiePuzzlesFromCsv(csvText: string): LogicPuzzle[] {
+  const rows = parseDelimitedRows(csvText);
   const parsed: LogicPuzzle[] = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const cols = splitCsvLine(lines[i]);
+  for (let i = 0; i < rows.length; i++) {
+    const cols = rows[i].map((c) => c.trim());
     if (cols.length < 2) continue;
 
     const firstLower = cols[0].toLowerCase();
     if (
       i === 0 &&
       (firstLower === 'tier' ||
-        firstLower === 'ระดับ' ||
-        firstLower === 'โจทย์' ||
+        firstLower.startsWith('ระดับ') ||
+        firstLower.startsWith('โจทย์') ||
         firstLower === 'prompt')
     ) {
       continue;

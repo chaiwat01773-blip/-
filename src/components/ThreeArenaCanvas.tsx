@@ -9,6 +9,7 @@ interface ThreeArenaCanvasProps {
   correctIndex: number | null;
   players: PlayerPublicState[];
   cameraPreset: CameraPreset;
+  splitScreen?: boolean;
   sceneRefOut: React.MutableRefObject<ArenaScene | null>;
   onLocalMove: (x: number, z: number, rotY: number, vy: number) => void;
   onPadSelect: (optionIndex: 0 | 1 | 2 | 3) => void;
@@ -21,6 +22,7 @@ export function ThreeArenaCanvas({
   correctIndex,
   players,
   cameraPreset,
+  splitScreen = false,
   sceneRefOut,
   onLocalMove,
   onPadSelect,
@@ -69,8 +71,12 @@ export function ThreeArenaCanvas({
     sceneRefOut.current?.setCameraPreset(cameraPreset);
   }, [cameraPreset, sceneRefOut]);
 
+  useEffect(() => {
+    sceneRefOut.current?.setSplitViewportMode(splitScreen);
+  }, [splitScreen, sceneRefOut]);
+
   return (
-    <div className="fixed inset-0 z-0 overflow-hidden bg-[#0b1628]">
+    <div className="relative w-full h-full overflow-hidden bg-[#0b1628]">
       <div ref={mountRef} className="w-full h-full" />
       {webglError && (
         <div

@@ -230,11 +230,11 @@ export function HomeOverlay({
                 <span className="block text-xs font-semibold text-slate-300 mb-1.5">
                   เลือกโหมดเกมที่จะเปิดห้อง
                 </span>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                   <button
                     type="button"
                     onClick={() => setHostMode('quiz')}
-                    className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition-colors cursor-pointer ${
+                    className={`px-2.5 py-2 rounded-xl border text-xs font-extrabold transition-colors cursor-pointer ${
                       hostMode === 'quiz'
                         ? 'border-amber-400 bg-amber-400/15 text-amber-300'
                         : 'border-slate-700 bg-slate-950/70 text-slate-300 hover:border-slate-500'
@@ -245,14 +245,26 @@ export function HomeOverlay({
                   <button
                     type="button"
                     onClick={() => setHostMode('zombie')}
-                    className={`px-3 py-2 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                    className={`px-2.5 py-2 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1 transition-colors cursor-pointer ${
                       hostMode === 'zombie'
                         ? 'border-emerald-400 bg-emerald-400/15 text-emerald-300'
                         : 'border-slate-700 bg-slate-950/70 text-slate-300 hover:border-slate-500'
                     }`}
                   >
-                    <Crosshair className="w-3.5 h-3.5" />
+                    <Crosshair className="w-3.5 h-3.5 shrink-0" />
                     ซอมบี้ (Co-op)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHostMode('zombie_teams')}
+                    className={`px-2.5 py-2 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+                      hostMode === 'zombie_teams'
+                        ? 'border-cyan-400 bg-cyan-400/15 text-cyan-300'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5 shrink-0" />
+                    ซอมบี้ 4 ทีม
                   </button>
                 </div>
               </div>
@@ -278,6 +290,15 @@ export function HomeOverlay({
                     {BUILTIN_QUESTION_PACKS.find((p) => p.id === selectedPackId)?.description}
                   </p>
                 </div>
+              ) : hostMode === 'zombie_teams' ? (
+                <div className="mb-4 rounded-xl border border-cyan-500/35 bg-cyan-950/40 p-3 text-xs text-cyan-100 space-y-1">
+                  <div className="font-bold text-cyan-300">
+                    โหมดซอมบี้แบ่ง 4 ทีม (ทีม A / B / C / D)
+                  </div>
+                  <p className="text-slate-300 leading-relaxed">
+                    ผู้เล่นเลือกเข้าทีม A, B, C หรือ D ในห้องรอ หน้าจอผู้เล่นแบ่งบนเป็น 3D ล่างเป็นคำถาม A-D ส่วนผู้คุม (Host) เห็นทุกทีมพร้อมกัน 2–4 จอ และกดขยายตรวจดูรายทีมได้!
+                  </p>
+                </div>
               ) : (
                 <div className="mb-4 rounded-xl border border-emerald-500/35 bg-emerald-950/40 p-3 text-xs text-emerald-100 space-y-1">
                   <div className="font-bold text-emerald-300">
@@ -296,13 +317,19 @@ export function HomeOverlay({
                 disabled={!connected}
                 onClick={() => onCreateRoom(selectedPackId, hostMode, avatar)}
                 className={`w-full py-3 px-4 rounded-xl font-bold text-slate-950 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 cursor-pointer ${
-                  hostMode === 'zombie'
-                    ? 'bg-emerald-400 hover:bg-emerald-300'
-                    : 'bg-amber-400 hover:bg-amber-300'
+                  hostMode === 'zombie_teams'
+                    ? 'bg-cyan-400 hover:bg-cyan-300'
+                    : hostMode === 'zombie'
+                      ? 'bg-emerald-400 hover:bg-emerald-300'
+                      : 'bg-amber-400 hover:bg-amber-300'
                 }`}
               >
                 <Plus className="w-5 h-5" />
-                {hostMode === 'zombie' ? 'สร้างห้องโหมดซอมบี้ (Create Room)' : 'สร้างห้องใหม่ (Create Room)'}
+                {hostMode === 'zombie_teams'
+                  ? 'สร้างห้องซอมบี้ 4 ทีม (Create Room)'
+                  : hostMode === 'zombie'
+                    ? 'สร้างห้องโหมดซอมบี้ (Create Room)'
+                    : 'สร้างห้องใหม่ (Create Room)'}
               </button>
               {window.location.hostname.startsWith('ais-dev-') ? (
                 <div className="rounded-xl border border-amber-400/40 bg-[#000000] p-2.5 text-center space-y-1.5">
